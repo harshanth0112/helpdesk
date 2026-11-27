@@ -408,6 +408,7 @@ export const UserManagementPage = () => {
                     >
                       <option value="employee">Employee</option>
                       <option value="technician">Technician</option>
+                      <option value="admin">Administrator</option>
                     </select>
                   </td>
                   <td className="p-3.5 text-right space-x-2 whitespace-nowrap">

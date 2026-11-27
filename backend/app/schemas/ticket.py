@@ -147,9 +147,9 @@ class UserApproveRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_approval_role(cls, v: str) -> str:
-        allowed = {"employee", "technician"}
+        allowed = {"employee", "technician", "admin"}
         if v.lower() not in allowed:
-            raise ValueError("Allowed roles during approval are: employee, technician.")
+            raise ValueError("Allowed roles during approval are: employee, technician, admin.")
         return v.lower()
 
 

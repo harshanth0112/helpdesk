@@ -210,10 +210,10 @@ def test_5_6_7_admin_approve_employee_and_technician_then_login(client, db_sessi
     pending_ids = [u["id"] for u in r_pending.json()]
     assert emp_id in pending_ids and tech_id in pending_ids
 
-    # Admin cannot assign 'admin' role directly during approval
+    # Admin cannot assign invalid role during approval
     r_bad_approve = client.patch(
         f"/api/v1/admin/users/{emp_id}/approve",
-        json={"role": "admin"},
+        json={"role": "superadmin"},
         headers=admin_headers,
     )
     assert r_bad_approve.status_code == 422
