@@ -8,6 +8,7 @@ export const ResetPasswordPage = () => {
   const [searchParams] = useSearchParams();
   const [token, setToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { error, success } = useToast();
   const navigate = useNavigate();
@@ -19,6 +20,10 @@ export const ResetPasswordPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      error('New passwords do not match. Please verify both entries.');
+      return;
+    }
     setSubmitting(true);
     try {
       await api.post('/auth/reset-password', {
@@ -45,6 +50,9 @@ export const ResetPasswordPage = () => {
         <div className="mb-6">
           <span className="text-xs font-mono uppercase tracking-widest text-neutral-500">Security Credentials</span>
           <h1 className="text-xl font-bold tracking-tight uppercase mt-1">Set New Password</h1>
+          <p className="text-xs text-neutral-600 mt-1">
+            Enter the reset token received in your email and confirm your new password below.
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -57,7 +65,7 @@ export const ResetPasswordPage = () => {
               required
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Paste token string"
+              placeholder="Paste token string from your email"
               className="w-full px-3.5 py-2.5 border border-neutral-300 focus:border-black focus:outline-hidden text-sm font-mono rounded-none"
             />
           </div>
@@ -71,6 +79,20 @@ export const ResetPasswordPage = () => {
               required
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="••••••••••••"
+              className="w-full px-3.5 py-2.5 border border-neutral-300 focus:border-black focus:outline-hidden text-sm rounded-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-mono uppercase tracking-wider text-neutral-700 mb-1">
+              Confirm New Password
+            </label>
+            <input
+              type="password"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="••••••••••••"
               className="w-full px-3.5 py-2.5 border border-neutral-300 focus:border-black focus:outline-hidden text-sm rounded-none"
             />

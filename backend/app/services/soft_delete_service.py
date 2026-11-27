@@ -105,13 +105,17 @@ def _revoke_user_refresh_tokens(db: Session, user_id: int) -> None:
 def soft_delete_user(
     db: Session,
     user_id: int,
-    actor: User,
+    actor: Optional[User] = None,
     reason: Optional[str] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    current_admin: Optional[User] = None,
+    deletion_reason: Optional[str] = None,
 ) -> User:
     """Soft-delete a user account with protected-account, self-delete, and last-admin checks."""
-    _require_admin(actor)
+    effective_admin = actor or current_admin
+    effective_reason = reason if reason is not None else deletion_reason
+    _require_admin(effective_admin)
 
     user = db.get(User, user_id)
     if not user:
@@ -122,7 +126,7 @@ def soft_delete_user(
             "This administrator account is permanently protected and cannot be deleted."
         )
 
-    if user.id == actor.id:
+    if user.id == effective_admin.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Administrators cannot delete their own account.",
@@ -142,32 +146,36 @@ def soft_delete_user(
             )
 
     now = datetime.now(timezone.utc)
-    cleaned_reason = _clean_reason(reason)
-    user.deleted_at = now
-    user.deleted_by = actor.id
-    user.deletion_reason = cleaned_reason
-    _revoke_user_refresh_tokens(db, user.id)
-    db.commit()
-    db.refresh(user)
+    cleaned_reason = _clean_reason(effective_reason)
+    try:
+        user.deleted_at = now
+        user.deleted_by = effective_admin.id
+        user.deletion_reason = cleaned_reason
+        _revoke_user_refresh_tokens(db, user.id)
+        db.commit()
+        db.refresh(user)
 
-    audit_service.record_audit_event(
-        db=db,
-        action="USER_SOFT_DELETED",
-        actor_id=actor.id,
-        entity_type="user",
-        entity_id=user.id,
-        old_values={"deleted_at": None},
-        new_values={
-            "deleted_at": now.isoformat(),
-            "deleted_by": actor.id,
-            "deletion_reason": cleaned_reason,
-            "email": user.email,
-            "role": user.role,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    return user
+        audit_service.record_audit_event(
+            db=db,
+            action="USER_SOFT_DELETED",
+            actor_id=effective_admin.id,
+            entity_type="user",
+            entity_id=user.id,
+            old_values={"deleted_at": None},
+            new_values={
+                "deleted_at": now.isoformat(),
+                "deleted_by": effective_admin.id,
+                "deletion_reason": cleaned_reason,
+                "email": user.email,
+                "role": user.role,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return user
+    except Exception:
+        db.rollback()
+        raise
 
 
 def soft_delete_ticket(
@@ -326,13 +334,17 @@ def soft_delete_attachment(
 def soft_delete_category(
     db: Session,
     category_id: int,
-    actor: User,
+    actor: Optional[User] = None,
     reason: Optional[str] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    current_admin: Optional[User] = None,
+    deletion_reason: Optional[str] = None,
 ) -> Category:
     """Admin-only soft deletion of a category, blocked if active tickets depend on it."""
-    _require_admin(actor)
+    effective_admin = actor or current_admin
+    effective_reason = reason if reason is not None else deletion_reason
+    _require_admin(effective_admin)
 
     category = db.get(Category, category_id)
     if not category:
@@ -356,30 +368,34 @@ def soft_delete_category(
         )
 
     now = datetime.now(timezone.utc)
-    cleaned_reason = _clean_reason(reason)
-    category.deleted_at = now
-    category.deleted_by = actor.id
-    category.deletion_reason = cleaned_reason
-    db.commit()
-    db.refresh(category)
+    cleaned_reason = _clean_reason(effective_reason)
+    try:
+        category.deleted_at = now
+        category.deleted_by = effective_admin.id
+        category.deletion_reason = cleaned_reason
+        db.commit()
+        db.refresh(category)
 
-    audit_service.record_audit_event(
-        db=db,
-        action="CATEGORY_SOFT_DELETED",
-        actor_id=actor.id,
-        entity_type="category",
-        entity_id=category.id,
-        old_values={"deleted_at": None},
-        new_values={
-            "deleted_at": now.isoformat(),
-            "deleted_by": actor.id,
-            "deletion_reason": cleaned_reason,
-            "name": category.name,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    return category
+        audit_service.record_audit_event(
+            db=db,
+            action="CATEGORY_SOFT_DELETED",
+            actor_id=effective_admin.id,
+            entity_type="category",
+            entity_id=category.id,
+            old_values={"deleted_at": None},
+            new_values={
+                "deleted_at": now.isoformat(),
+                "deleted_by": effective_admin.id,
+                "deletion_reason": cleaned_reason,
+                "name": category.name,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return category
+    except Exception:
+        db.rollback()
+        raise
 
 
 def _validate_entity(entity: str) -> str:
@@ -547,9 +563,10 @@ def restore_entity(
     db: Session,
     entity: str,
     record_id: int,
-    actor: User,
+    actor: Optional[User] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    current_admin: Optional[User] = None,
 ) -> Dict[str, Any]:
     """
     Admin-only restoration of a soft-deleted record.
@@ -557,7 +574,8 @@ def restore_entity(
     - Never modifies user approval_status or is_active.
     - Never auto-restores independently deleted child comments/attachments.
     """
-    _require_admin(actor)
+    effective_admin = actor or current_admin
+    _require_admin(effective_admin)
     entity_key = _validate_entity(entity)
     model = ENTITY_MODEL_MAP[entity_key]
 
@@ -577,34 +595,38 @@ def restore_entity(
         "deletion_reason": record.deletion_reason,
     }
 
-    record.deleted_at = None
-    record.deleted_by = None
-    record.deletion_reason = None
-    db.commit()
-    db.refresh(record)
+    try:
+        record.deleted_at = None
+        record.deleted_by = None
+        record.deletion_reason = None
+        db.commit()
+        db.refresh(record)
 
-    ticket_id = None
-    if entity_key == "tickets":
-        ticket_id = record.id
-    elif entity_key in ("comments", "attachments"):
-        ticket_id = record.ticket_id
+        ticket_id = None
+        if entity_key == "tickets":
+            ticket_id = record.id
+        elif entity_key in ("comments", "attachments"):
+            ticket_id = record.ticket_id
 
-    audit_service.record_audit_event(
-        db=db,
-        action=RESTORE_AUDIT_ACTIONS[entity_key],
-        actor_id=actor.id,
-        entity_type=ENTITY_SINGULAR[entity_key],
-        entity_id=record.id,
-        ticket_id=ticket_id,
-        old_values=old_values,
-        new_values={"deleted_at": None, "restored_by": actor.id},
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
+        audit_service.record_audit_event(
+            db=db,
+            action=RESTORE_AUDIT_ACTIONS[entity_key],
+            actor_id=effective_admin.id,
+            entity_type=ENTITY_SINGULAR[entity_key],
+            entity_id=record.id,
+            ticket_id=ticket_id,
+            old_values=old_values,
+            new_values={"deleted_at": None, "restored_by": effective_admin.id},
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
 
-    return {
-        "status": "restored",
-        "entity": entity_key,
-        "id": record.id,
-        "restored_by": actor.id,
-    }
+        return {
+            "status": "restored",
+            "entity": entity_key,
+            "id": record.id,
+            "restored_by": effective_admin.id,
+        }
+    except Exception:
+        db.rollback()
+        raise

@@ -75,6 +75,12 @@ def db_session():
 
 @pytest.fixture()
 def client(db_session: Session):
+    from limits.storage import MemoryStorage
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+
+    app.state.limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+
     def override_get_db():
         try:
             yield db_session

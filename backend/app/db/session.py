@@ -1,7 +1,20 @@
+import logging
 from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from app.config import settings
+
+def configure_database_logging() -> None:
+    """
+    Ensure SQLAlchemy engine query and parameter value logging is disabled in production
+    so passwords, tokens, hashes, and PII are never logged.
+    """
+    if settings.is_production:
+        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+        logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
+        logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+
+configure_database_logging()
 
 # Production (free-tier) uses a smaller pool to stay within Railway connection limits.
 # Development keeps the larger pool for concurrent test runners.
@@ -16,7 +29,7 @@ engine = create_engine(
     max_overflow=_max_overflow, # Temporary extra connections allowed above pool_size
     pool_recycle=1800,          # Recycle connections every 30 min (avoids stale TCP)
     pool_timeout=30,            # Raise after 30 s waiting for a free connection
-    echo=settings.DEBUG,        # Log SQL only in debug mode — never in production
+    echo=False if settings.is_production else settings.DEBUG,  # Never log SQL or parameter values in production
 )
 
 # Session factory configured with autocommit=False, autoflush=False

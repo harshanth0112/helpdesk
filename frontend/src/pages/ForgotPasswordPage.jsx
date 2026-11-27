@@ -2,25 +2,21 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
-import { ArrowRight, ArrowLeft } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Mail } from 'lucide-react';
 
 export const ForgotPasswordPage = () => {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [resetToken, setResetToken] = useState(null); // Displayed in dev preview for testing convenience
   const { error, success } = useToast();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const res = await api.post('/auth/forgot-password', { email });
+      await api.post('/auth/forgot-password', { email });
       setSubmitted(true);
-      success('Password reset instructions processed.');
-      if (res.data.reset_token) {
-        setResetToken(res.data.reset_token);
-      }
+      success('Password reset instructions sent. Please check your email.');
     } catch {
       error('Failed to request password reset.');
     } finally {
@@ -40,30 +36,34 @@ export const ForgotPasswordPage = () => {
           <span className="text-xs font-mono uppercase tracking-widest text-neutral-500">Account Recovery</span>
           <h1 className="text-xl font-bold tracking-tight uppercase mt-1">Forgot Password</h1>
           <p className="text-xs text-neutral-600 mt-1">
-            Enter your corporate email address. If registered, a reset confirmation token will be issued.
+            Enter your corporate email address. If registered, a password reset link will be sent directly to your inbox.
           </p>
         </div>
 
         {submitted ? (
           <div className="space-y-4">
-            <div className="p-4 bg-neutral-50 border border-neutral-200 text-xs text-neutral-800 leading-relaxed">
-              If an account exists for <span className="font-semibold">{email}</span>, password reset instructions have been generated.
+            <div className="p-4 bg-neutral-50 border border-neutral-200 text-xs text-neutral-800 leading-relaxed space-y-2">
+              <div className="flex items-center gap-2 text-black font-semibold uppercase font-mono text-[11px]">
+                <Mail className="w-4 h-4 text-black shrink-0" />
+                <span>Check Your Mail</span>
+              </div>
+              <p>
+                If an account exists for <span className="font-semibold">{email}</span>, a password reset link has been dispatched to your email address.
+              </p>
+              <p className="text-neutral-500 text-[11px]">
+                Please check your inbox and spam folder. Click the secure reset link inside the email to choose your new password.
+              </p>
             </div>
 
-            {resetToken && (
-              <div className="p-3 bg-neutral-100 border border-neutral-300 text-xs font-mono break-all">
-                <span className="font-bold block text-neutral-500 text-[10px] uppercase">Dev Preview Reset Token:</span>
-                {resetToken}
-                <div className="mt-2">
-                  <Link
-                    to={`/reset-password?token=${resetToken}`}
-                    className="inline-block bg-black text-white px-3 py-1.5 text-[11px] uppercase font-mono"
-                  >
-                    Proceed to Reset
-                  </Link>
-                </div>
-              </div>
-            )}
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setSubmitted(false)}
+                className="text-xs font-mono text-neutral-500 hover:text-black uppercase underline"
+              >
+                Send to a different email address
+              </button>
+            </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -86,7 +86,7 @@ export const ForgotPasswordPage = () => {
               disabled={submitting}
               className="w-full mt-2 flex items-center justify-center gap-2 bg-black text-white hover:bg-neutral-800 py-3 text-xs font-mono uppercase tracking-wider font-semibold transition-colors disabled:opacity-50"
             >
-              <span>{submitting ? 'Sending...' : 'Send Recovery Token'}</span>
+              <span>{submitting ? 'Sending...' : 'Send Reset Link to Mail'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

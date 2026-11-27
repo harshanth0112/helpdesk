@@ -437,3 +437,167 @@ def test_audit_logs_recorded(db):
     ).first()
     assert log_res is not None
     assert log_res.actor_id == admin.id
+
+
+# ===========================================================================
+# 9. Admin User Deletion Route Regression Tests
+# ===========================================================================
+
+from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from app.main import app
+from app.db.session import get_db
+from app.core.security import generate_jwt_access_token
+
+SHARED_TEST_ENGINE = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+Base.metadata.create_all(bind=SHARED_TEST_ENGINE)
+SharedTestingSession = sessionmaker(
+    bind=SHARED_TEST_ENGINE,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
+
+
+@pytest.fixture()
+def client():
+    session = SharedTestingSession()
+
+    def override_get_db():
+        try:
+            yield session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        c.db = session
+        yield c
+    app.dependency_overrides.clear()
+    session.rollback()
+    session.close()
+
+
+def test_api_admin_delete_eligible_user_success(client):
+    """Verify DELETE /api/v1/admin/users/{user_id} succeeds (HTTP 204) for an eligible user."""
+    db = client.db
+    admin = make_user(db, "api_admin1@example.com", "admin")
+    make_user(db, "api_admin2@example.com", "admin")
+    target_user = make_user(db, "target_employee@example.com", "employee")
+
+    token = generate_jwt_access_token({"sub": str(admin.id), "role": admin.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.request(
+        "DELETE",
+        f"/api/v1/admin/users/{target_user.id}",
+        headers=headers,
+        json={"deletion_reason": "Employee left company"},
+    )
+    assert resp.status_code == 204
+
+    # Verify target_user is soft-deleted in DB
+    db.expire_all()
+    refreshed = db.get(User, target_user.id)
+    assert refreshed.deleted_at is not None
+    assert refreshed.deleted_by == admin.id
+    assert refreshed.deletion_reason == "Employee left company"
+
+    # Verify audit log was recorded
+    audit = db.query(AuditLog).filter(
+        AuditLog.action == "USER_SOFT_DELETED",
+        AuditLog.entity_id == target_user.id,
+    ).first()
+    assert audit is not None
+    assert audit.actor_id == admin.id
+
+
+def test_api_admin_delete_protected_account_returns_403(client):
+    """Verify DELETE /api/v1/admin/users/{user_id} returns 403 Forbidden for protected admin."""
+    db = client.db
+    admin = make_user(db, "api_admin_caller@example.com", "admin")
+    make_user(db, "api_admin_caller2@example.com", "admin")
+    protected = make_user(db, "h641191@gmail.com", "admin")
+
+    token = generate_jwt_access_token({"sub": str(admin.id), "role": admin.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.request(
+        "DELETE",
+        f"/api/v1/admin/users/{protected.id}",
+        headers=headers,
+        json={"deletion_reason": "Malicious attempt"},
+    )
+    assert resp.status_code == 403
+    assert "permanently protected" in resp.json().get("detail", "").lower()
+
+    db.expire_all()
+    refreshed = db.get(User, protected.id)
+    assert refreshed.deleted_at is None
+
+
+def test_api_admin_delete_self_prevention(client):
+    """Verify admin cannot delete their own account via API (HTTP 400)."""
+    db = client.db
+    admin = make_user(db, "api_self_admin@example.com", "admin")
+    make_user(db, "api_other_admin@example.com", "admin")
+
+    token = generate_jwt_access_token({"sub": str(admin.id), "role": admin.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.delete(f"/api/v1/admin/users/{admin.id}", headers=headers)
+    assert resp.status_code == 400
+    assert "own account" in resp.json().get("detail", "").lower()
+
+
+def test_api_admin_delete_last_admin_prevention(client):
+    """Verify admin cannot delete the last active administrator via API (HTTP 400)."""
+    from unittest.mock import patch
+
+    db = client.db
+    caller_admin = make_user(db, "api_caller_admin@example.com", "admin")
+    last_active_admin = make_user(db, "api_last_target@example.com", "admin")
+
+    token = generate_jwt_access_token({"sub": str(caller_admin.id), "role": caller_admin.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("app.services.soft_delete_service.count_active_admins", return_value=1):
+        resp = client.delete(f"/api/v1/admin/users/{last_active_admin.id}", headers=headers)
+        assert resp.status_code == 400
+        assert "last active" in resp.json().get("detail", "").lower()
+
+
+def test_api_non_admin_cannot_delete_user(client):
+    """Verify non-admin (employee) cannot call DELETE /api/v1/admin/users/{user_id} (HTTP 403)."""
+    db = client.db
+    employee = make_user(db, "api_emp_caller@example.com", "employee")
+    target = make_user(db, "api_target_emp@example.com", "employee")
+
+    token = generate_jwt_access_token({"sub": str(employee.id), "role": employee.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    resp = client.delete(f"/api/v1/admin/users/{target.id}", headers=headers)
+    assert resp.status_code == 403
+
+
+def test_production_logging_parameter_exposure_disabled():
+    """Verify SQLAlchemy engine parameter and statement logging is disabled in production."""
+    from unittest.mock import patch
+    import logging
+    from app import config
+    from app.db import session
+
+    with patch.object(config.settings, "ENVIRONMENT", "production"), \
+         patch.object(config.settings, "DEBUG", False):
+        assert config.settings.is_production is True
+        session.configure_database_logging()
+        # Verify logger level for sqlalchemy.engine is set to WARNING in production
+        engine_logger = logging.getLogger("sqlalchemy.engine")
+        assert engine_logger.level == logging.WARNING
+        # Verify engine echo would be False in production
+        echo_setting = False if config.settings.is_production else config.settings.DEBUG
+        assert echo_setting is False
