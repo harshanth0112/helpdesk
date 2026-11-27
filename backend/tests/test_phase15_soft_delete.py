@@ -601,3 +601,68 @@ def test_production_logging_parameter_exposure_disabled():
         # Verify engine echo would be False in production
         echo_setting = False if config.settings.is_production else config.settings.DEBUG
         assert echo_setting is False
+
+
+def test_api_admin_delete_ticket_comment_attachment_success(client, tmp_path):
+    """Verify DELETE endpoints for tickets, comments, and attachments work via API without parameter mismatch."""
+    db = client.db
+    admin = make_user(db, "api_ticket_adm@example.com", "admin")
+    emp = make_user(db, "api_ticket_emp@example.com", "employee")
+
+    token = generate_jwt_access_token({"sub": str(admin.id), "role": admin.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create closed ticket
+    ticket = make_ticket(db, emp.id, status="closed")
+
+    # Create comment
+    cmt = Comment(ticket_id=ticket.id, user_id=emp.id, comment_text="Test comment")
+    db.add(cmt)
+
+    # Create attachment
+    test_f = tmp_path / "test_api_att.txt"
+    test_f.write_text("sample content")
+    att = Attachment(
+        ticket_id=ticket.id,
+        uploaded_by=emp.id,
+        file_name="test_api_att.txt",
+        file_path=str(test_f),
+        file_size_bytes=14,
+        mime_type="text/plain",
+    )
+    db.add(att)
+    db.commit()
+
+    # 1. Delete attachment via API
+    resp_att = client.request(
+        "DELETE",
+        f"/api/v1/tickets/{ticket.id}/attachments/{att.id}",
+        headers=headers,
+        json={"deletion_reason": "Outdated attachment"},
+    )
+    assert resp_att.status_code == 204
+    db.expire_all()
+    assert db.get(Attachment, att.id).deleted_at is not None
+
+    # 2. Delete comment via API
+    resp_cmt = client.request(
+        "DELETE",
+        f"/api/v1/tickets/{ticket.id}/comments/{cmt.id}",
+        headers=headers,
+        json={"deletion_reason": "Inappropriate language"},
+    )
+    assert resp_cmt.status_code == 204
+    db.expire_all()
+    assert db.get(Comment, cmt.id).deleted_at is not None
+
+    # 3. Delete ticket via API
+    resp_tck = client.request(
+        "DELETE",
+        f"/api/v1/tickets/{ticket.id}",
+        headers=headers,
+        json={"deletion_reason": "Resolved and purged"},
+    )
+    assert resp_tck.status_code == 204
+    db.expire_all()
+    assert db.get(Ticket, ticket.id).deleted_at is not None
+

@@ -181,13 +181,17 @@ def soft_delete_user(
 def soft_delete_ticket(
     db: Session,
     ticket_id: int,
-    actor: User,
+    actor: Optional[User] = None,
     reason: Optional[str] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    current_admin: Optional[User] = None,
+    deletion_reason: Optional[str] = None,
 ) -> Ticket:
     """Soft-delete a closed/resolved ticket (Admin-only) without cascading to child rows."""
-    _require_admin(actor)
+    effective_admin = actor or current_admin
+    effective_reason = reason if reason is not None else deletion_reason
+    _require_admin(effective_admin)
 
     ticket = db.get(Ticket, ticket_id)
     if not ticket:
@@ -205,44 +209,52 @@ def soft_delete_ticket(
         )
 
     now = datetime.now(timezone.utc)
-    cleaned_reason = _clean_reason(reason)
-    ticket.deleted_at = now
-    ticket.deleted_by = actor.id
-    ticket.deletion_reason = cleaned_reason
-    db.commit()
-    db.refresh(ticket)
+    cleaned_reason = _clean_reason(effective_reason)
+    try:
+        ticket.deleted_at = now
+        ticket.deleted_by = effective_admin.id
+        ticket.deletion_reason = cleaned_reason
+        db.commit()
+        db.refresh(ticket)
 
-    audit_service.record_audit_event(
-        db=db,
-        action="TICKET_SOFT_DELETED",
-        actor_id=actor.id,
-        entity_type="ticket",
-        entity_id=ticket.id,
-        ticket_id=ticket.id,
-        old_values={"deleted_at": None},
-        new_values={
-            "deleted_at": now.isoformat(),
-            "deleted_by": actor.id,
-            "deletion_reason": cleaned_reason,
-            "ticket_number": ticket.ticket_number,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    return ticket
+        audit_service.record_audit_event(
+            db=db,
+            action="TICKET_SOFT_DELETED",
+            actor_id=effective_admin.id,
+            entity_type="ticket",
+            entity_id=ticket.id,
+            ticket_id=ticket.id,
+            old_values={"deleted_at": None},
+            new_values={
+                "deleted_at": now.isoformat(),
+                "deleted_by": effective_admin.id,
+                "deletion_reason": cleaned_reason,
+                "ticket_number": ticket.ticket_number,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return ticket
+    except Exception:
+        db.rollback()
+        raise
 
 
 def soft_delete_comment(
     db: Session,
     ticket_id: int,
     comment_id: int,
-    actor: User,
+    actor: Optional[User] = None,
     reason: Optional[str] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    current_admin: Optional[User] = None,
+    deletion_reason: Optional[str] = None,
 ) -> Comment:
     """Admin-only soft deletion of a comment."""
-    _require_admin(actor)
+    effective_admin = actor or current_admin
+    effective_reason = reason if reason is not None else deletion_reason
+    _require_admin(effective_admin)
 
     comment = db.get(Comment, comment_id)
     if not comment or comment.ticket_id != ticket_id:
@@ -255,43 +267,51 @@ def soft_delete_comment(
         )
 
     now = datetime.now(timezone.utc)
-    cleaned_reason = _clean_reason(reason)
-    comment.deleted_at = now
-    comment.deleted_by = actor.id
-    comment.deletion_reason = cleaned_reason
-    db.commit()
-    db.refresh(comment)
+    cleaned_reason = _clean_reason(effective_reason)
+    try:
+        comment.deleted_at = now
+        comment.deleted_by = effective_admin.id
+        comment.deletion_reason = cleaned_reason
+        db.commit()
+        db.refresh(comment)
 
-    audit_service.record_audit_event(
-        db=db,
-        action="COMMENT_SOFT_DELETED",
-        actor_id=actor.id,
-        entity_type="comment",
-        entity_id=comment.id,
-        ticket_id=comment.ticket_id,
-        old_values={"deleted_at": None},
-        new_values={
-            "deleted_at": now.isoformat(),
-            "deleted_by": actor.id,
-            "deletion_reason": cleaned_reason,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    return comment
+        audit_service.record_audit_event(
+            db=db,
+            action="COMMENT_SOFT_DELETED",
+            actor_id=effective_admin.id,
+            entity_type="comment",
+            entity_id=comment.id,
+            ticket_id=comment.ticket_id,
+            old_values={"deleted_at": None},
+            new_values={
+                "deleted_at": now.isoformat(),
+                "deleted_by": effective_admin.id,
+                "deletion_reason": cleaned_reason,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return comment
+    except Exception:
+        db.rollback()
+        raise
 
 
 def soft_delete_attachment(
     db: Session,
     attachment_id: int,
-    actor: User,
+    actor: Optional[User] = None,
     ticket_id: Optional[int] = None,
     reason: Optional[str] = None,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    current_admin: Optional[User] = None,
+    deletion_reason: Optional[str] = None,
 ) -> Attachment:
     """Admin-only soft deletion of an attachment. Physical file on disk is preserved."""
-    _require_admin(actor)
+    effective_admin = actor or current_admin
+    effective_reason = reason if reason is not None else deletion_reason
+    _require_admin(effective_admin)
 
     attachment = db.get(Attachment, attachment_id)
     if not attachment or (ticket_id is not None and attachment.ticket_id != ticket_id):
@@ -304,31 +324,35 @@ def soft_delete_attachment(
         )
 
     now = datetime.now(timezone.utc)
-    cleaned_reason = _clean_reason(reason)
-    attachment.deleted_at = now
-    attachment.deleted_by = actor.id
-    attachment.deletion_reason = cleaned_reason
-    db.commit()
-    db.refresh(attachment)
+    cleaned_reason = _clean_reason(effective_reason)
+    try:
+        attachment.deleted_at = now
+        attachment.deleted_by = effective_admin.id
+        attachment.deletion_reason = cleaned_reason
+        db.commit()
+        db.refresh(attachment)
 
-    audit_service.record_audit_event(
-        db=db,
-        action="ATTACHMENT_SOFT_DELETED",
-        actor_id=actor.id,
-        entity_type="attachment",
-        entity_id=attachment.id,
-        ticket_id=attachment.ticket_id,
-        old_values={"deleted_at": None},
-        new_values={
-            "deleted_at": now.isoformat(),
-            "deleted_by": actor.id,
-            "deletion_reason": cleaned_reason,
-            "file_name": attachment.file_name,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    return attachment
+        audit_service.record_audit_event(
+            db=db,
+            action="ATTACHMENT_SOFT_DELETED",
+            actor_id=effective_admin.id,
+            entity_type="attachment",
+            entity_id=attachment.id,
+            ticket_id=attachment.ticket_id,
+            old_values={"deleted_at": None},
+            new_values={
+                "deleted_at": now.isoformat(),
+                "deleted_by": effective_admin.id,
+                "deletion_reason": cleaned_reason,
+                "file_name": attachment.file_name,
+            },
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return attachment
+    except Exception:
+        db.rollback()
+        raise
 
 
 def soft_delete_category(

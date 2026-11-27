@@ -232,8 +232,8 @@ def delete_ticket(
     soft_delete_service.soft_delete_ticket(
         db=db,
         ticket_id=ticket_id,
-        current_admin=current_admin,
-        deletion_reason=reason,
+        actor=current_admin,
+        reason=reason,
         ip_address=ip_addr,
         user_agent=user_agent,
     )
@@ -379,8 +379,8 @@ def delete_comment(
         db=db,
         ticket_id=ticket_id,
         comment_id=comment_id,
-        current_admin=current_admin,
-        deletion_reason=reason,
+        actor=current_admin,
+        reason=reason,
         ip_address=ip_addr,
         user_agent=user_agent,
     )
@@ -441,9 +441,9 @@ def delete_attachment(
     soft_delete_service.soft_delete_attachment(
         db=db,
         attachment_id=attachment_id,
-        current_admin=current_admin,
+        actor=current_admin,
         ticket_id=ticket_id,
-        deletion_reason=reason,
+        reason=reason,
         ip_address=ip_addr,
         user_agent=user_agent,
     )

@@ -471,18 +471,14 @@ def delete_user(
     reason = payload.deletion_reason if payload else None
     ip_addr = request.client.host if request and request.client else None
     user_agent = request.headers.get("user-agent") if request else None
-    try:
-        soft_delete_user(
-            db=db,
-            user_id=user_id,
-            actor=current_admin,
-            reason=reason,
-            ip_address=ip_addr,
-            user_agent=user_agent,
-        )
-    except Exception:
-        db.rollback()
-        raise
+    soft_delete_user(
+        db=db,
+        user_id=user_id,
+        actor=current_admin,
+        reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
     return None
 
 
@@ -498,18 +494,14 @@ def delete_category(
     reason = payload.deletion_reason if payload else None
     ip_addr = request.client.host if request and request.client else None
     user_agent = request.headers.get("user-agent") if request else None
-    try:
-        soft_delete_category(
-            db=db,
-            category_id=category_id,
-            actor=current_admin,
-            reason=reason,
-            ip_address=ip_addr,
-            user_agent=user_agent,
-        )
-    except Exception:
-        db.rollback()
-        raise
+    soft_delete_category(
+        db=db,
+        category_id=category_id,
+        actor=current_admin,
+        reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
     return None
 
 
