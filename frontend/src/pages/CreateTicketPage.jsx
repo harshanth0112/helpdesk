@@ -28,7 +28,7 @@ export const CreateTicketPage = () => {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const res = await api.get('/admin/categories');
+        const res = await api.get('/tickets/categories');
         const cats = res.data || [];
         setCategories(cats);
         if (cats.length > 0) {

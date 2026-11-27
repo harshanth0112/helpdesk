@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, BigInteger, DateTime, ForeignKey, CheckConstraint, Index, func
+from typing import Optional
+from sqlalchemy import String, Integer, BigInteger, DateTime, Text, ForeignKey, CheckConstraint, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -30,9 +31,20 @@ class Attachment(Base):
         nullable=False
     )
 
+    # Soft delete metadata — added Phase 15
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    deletion_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Relationships
     ticket: Mapped["Ticket"] = relationship("Ticket", back_populates="attachments")
-    uploader: Mapped["User"] = relationship("User", back_populates="attachments")
+    uploader: Mapped["User"] = relationship(
+        "User",
+        back_populates="attachments",
+        foreign_keys=[uploaded_by]
+    )
 
     __table_args__ = (
         CheckConstraint(

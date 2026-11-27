@@ -24,11 +24,20 @@ from app.schemas.ticket import (
     CategoryCreate,
     CategoryUpdate,
     CategoryResponse,
+    SoftDeleteRequest,
+    PaginatedRecycleBinResponse,
+    RestoreResponse,
 )
 from app.models.category import Category
 from app.services import audit_service
 from app.services import analytics_service
 from app.services.email_service import dispatch_email
+from app.services.soft_delete_service import (
+    soft_delete_user,
+    soft_delete_category,
+    list_recycle_bin,
+    restore_entity,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Administration"])
 
@@ -51,6 +60,7 @@ def _count_active_admins(db: Session) -> int:
             User.role == "admin",
             User.is_active.is_(True),
             User.approval_status == "approved",
+            User.deleted_at.is_(None),
         )
         .count()
     )
@@ -61,7 +71,7 @@ def list_pending_users(db: Session = Depends(get_db)):
     """Admin-only: list all users awaiting approval."""
     return (
         db.query(User)
-        .filter(User.approval_status == "pending")
+        .filter(User.approval_status == "pending", User.deleted_at.is_(None))
         .order_by(User.created_at.asc())
         .all()
     )
@@ -73,7 +83,7 @@ def list_users(
     db: Session = Depends(get_db),
 ):
     """Admin-only: list all users with optional approval_status filter."""
-    query = db.query(User)
+    query = db.query(User).filter(User.deleted_at.is_(None))
     if approval_status:
         query = query.filter(User.approval_status == approval_status.lower())
     return query.order_by(User.id.asc()).all()
@@ -90,7 +100,7 @@ def approve_user(
 ):
     """Admin-only: approve a pending/rejected registration and assign an initial role (employee or technician)."""
     user = db.get(User, user_id)
-    if not user:
+    if not user or user.deleted_at is not None:
         raise ResourceNotFoundError("User not found.")
 
     if user.approval_status == "approved":
@@ -153,7 +163,7 @@ def reject_user(
 ):
     """Admin-only: reject a pending user registration."""
     user = db.get(User, user_id)
-    if not user:
+    if not user or user.deleted_at is not None:
         raise ResourceNotFoundError("User not found.")
 
     if user.role == "admin":
@@ -213,7 +223,7 @@ def update_user_role(
 ):
     """Admin-only: change a user's role and record an audit log event."""
     user = db.get(User, user_id)
-    if not user:
+    if not user or user.deleted_at is not None:
         raise ResourceNotFoundError("User not found.")
 
     if user.role == "admin" and payload.role != "admin":
@@ -253,7 +263,7 @@ def update_user_status(
 ):
     """Admin-only: suspend or reactivate a user account."""
     user = db.get(User, user_id)
-    if not user:
+    if not user or user.deleted_at is not None:
         raise ResourceNotFoundError("User not found.")
 
     old_values = {
@@ -348,15 +358,17 @@ def get_audit_logs(
 @router.get("/technicians/workload", dependencies=[Depends(require_role("admin"))])
 def get_technicians_workload(db: Session = Depends(get_db)):
     """Module 1: Display technician workload and active ticket queues."""
-    techs = db.query(User).filter(User.role.in_(["technician", "admin"])).all()
+    techs = db.query(User).filter(User.role.in_(["technician", "admin"]), User.deleted_at.is_(None)).all()
     workload = []
     for tech in techs:
         active_tickets = db.query(Ticket).filter(
             Ticket.assigned_to == tech.id,
+            Ticket.deleted_at.is_(None),
             Ticket.status.in_(["assigned", "in_progress", "pending"])
         ).count()
         resolved_tickets = db.query(Ticket).filter(
             Ticket.assigned_to == tech.id,
+            Ticket.deleted_at.is_(None),
             Ticket.status.in_(["resolved", "closed"])
         ).count()
         workload.append({
@@ -396,13 +408,16 @@ def get_analytics(
 @router.get("/categories", response_model=List[CategoryResponse], dependencies=[Depends(require_role("admin"))])
 def list_categories(db: Session = Depends(get_db)):
     """Admin-only: list all support categories."""
-    return db.query(Category).order_by(Category.id.asc()).all()
+    return db.query(Category).filter(Category.deleted_at.is_(None)).order_by(Category.id.asc()).all()
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_role("admin"))])
 def create_category(payload: CategoryCreate, db: Session = Depends(get_db)):
     """Admin-only: create a new support category."""
-    existing = db.query(Category).filter(Category.name.ilike(payload.name.strip())).first()
+    existing = db.query(Category).filter(
+        Category.name.ilike(payload.name.strip()),
+        Category.deleted_at.is_(None)
+    ).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category with this name already exists.")
     category = Category(
@@ -420,12 +435,13 @@ def create_category(payload: CategoryCreate, db: Session = Depends(get_db)):
 def update_category(category_id: int, payload: CategoryUpdate, db: Session = Depends(get_db)):
     """Admin-only: update or activate/deactivate a category."""
     category = db.get(Category, category_id)
-    if not category:
+    if not category or category.deleted_at is not None:
         raise ResourceNotFoundError("Category not found.")
     if payload.name is not None:
         conflict = db.query(Category).filter(
             Category.name.ilike(payload.name.strip()),
-            Category.id != category_id
+            Category.id != category_id,
+            Category.deleted_at.is_(None)
         ).first()
         if conflict:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Another category has this name.")
@@ -437,5 +453,100 @@ def update_category(category_id: int, payload: CategoryUpdate, db: Session = Dep
     db.commit()
     db.refresh(category)
     return category
+
+
+# ---------------------------------------------------------------------------
+# Soft Delete & Recycle Bin Endpoints (Admin-only)
+# ---------------------------------------------------------------------------
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    payload: Optional[SoftDeleteRequest] = None,
+    request: Request = None,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: soft delete a user account with safeguards."""
+    reason = payload.deletion_reason if payload else None
+    ip_addr = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    soft_delete_user(
+        db=db,
+        user_id=user_id,
+        current_admin=current_admin,
+        deletion_reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+    return None
+
+
+@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(
+    category_id: int,
+    payload: Optional[SoftDeleteRequest] = None,
+    request: Request = None,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: soft delete a category (verifies no active tickets)."""
+    reason = payload.deletion_reason if payload else None
+    ip_addr = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    soft_delete_category(
+        db=db,
+        category_id=category_id,
+        current_admin=current_admin,
+        deletion_reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+    return None
+
+
+@router.get("/recycle-bin/{entity}", response_model=PaginatedRecycleBinResponse, dependencies=[Depends(require_role("admin"))])
+def get_recycle_bin(
+    entity: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    search: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None),
+    sort_by: str = Query("deleted_at"),
+    sort_order: str = Query("desc"),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: list soft-deleted records for a given entity."""
+    return list_recycle_bin(
+        db=db,
+        entity=entity,
+        page=page,
+        page_size=page_size,
+        search=search,
+        status_filter=status_filter,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+
+
+@router.post("/recycle-bin/{entity}/{record_id}/restore", response_model=RestoreResponse)
+def restore_deleted_record(
+    entity: str,
+    record_id: int,
+    request: Request = None,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: restore a soft-deleted record without altering activation/approval status."""
+    ip_addr = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    return restore_entity(
+        db=db,
+        entity=entity,
+        record_id=record_id,
+        current_admin=current_admin,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
 
 

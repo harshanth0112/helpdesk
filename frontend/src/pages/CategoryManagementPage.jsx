@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { LoadingState } from '../components/TableControls';
-import { FolderTree, Plus, CheckCircle2, XCircle, Edit2, ShieldAlert } from 'lucide-react';
+import { FolderTree, Plus, CheckCircle2, XCircle, Edit2, Trash2, ShieldAlert } from 'lucide-react';
 
 export const CategoryManagementPage = () => {
   const [categories, setCategories] = useState([]);
@@ -11,6 +11,12 @@ export const CategoryManagementPage = () => {
   const [editingCategory, setEditingCategory] = useState(null);
   const [formData, setFormData] = useState({ name: '', description: '', is_active: true });
   const [saving, setSaving] = useState(false);
+
+  // Soft delete state
+  const [deleteModalCategory, setDeleteModalCategory] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
   const { success, error } = useToast();
 
   const fetchCategories = async () => {
@@ -73,6 +79,24 @@ export const CategoryManagementPage = () => {
       fetchCategories();
     } catch (err) {
       error(err.response?.data?.detail || 'Failed to update category status.');
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModalCategory) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/admin/categories/${deleteModalCategory.id}`, {
+        data: { deletion_reason: deleteReason.trim() || null },
+      });
+      success(`Category "${deleteModalCategory.name}" soft-deleted successfully.`);
+      setDeleteModalCategory(null);
+      setDeleteReason('');
+      fetchCategories();
+    } catch (err) {
+      error(err.response?.data?.detail || 'Failed to delete category.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -158,6 +182,17 @@ export const CategoryManagementPage = () => {
                     >
                       <span>{cat.is_active ? 'Deactivate' : 'Activate'}</span>
                     </button>
+                    <button
+                      onClick={() => {
+                        setDeleteModalCategory(cat);
+                        setDeleteReason('');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-mono uppercase border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                      title="Soft delete category"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
                   </td>
                 </tr>
               ))
@@ -165,6 +200,60 @@ export const CategoryManagementPage = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white border border-neutral-300 max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2 border border-red-200 bg-red-50 text-red-700 shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-mono uppercase font-bold tracking-wider text-black">
+                  Soft Delete Category
+                </h2>
+                <p className="text-xs text-neutral-600 mt-1">
+                  Are you sure you want to soft delete category "{deleteModalCategory.name}"?
+                  It will be moved to the Recycle Bin and hidden from ticket forms.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono uppercase text-neutral-700 mb-1">
+                Reason for deletion (optional)
+              </label>
+              <textarea
+                rows={2}
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="Optional audit reason..."
+                className="w-full p-2 border border-neutral-300 focus:border-black focus:outline-hidden text-xs rounded-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-200">
+              <button
+                type="button"
+                onClick={() => setDeleteModalCategory(null)}
+                disabled={deleting}
+                className="px-4 py-2 border border-neutral-300 text-xs font-mono uppercase hover:bg-neutral-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 text-white text-xs font-mono uppercase font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Confirm Soft Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal for Create / Edit */}
       {isModalOpen && (

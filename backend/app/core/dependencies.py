@@ -63,7 +63,7 @@ def get_current_user(
         raise credentials_exception
 
     user: User | None = db.get(User, user_id)
-    if user is None:
+    if user is None or user.deleted_at is not None:
         raise credentials_exception
     if user.approval_status == "pending":
         raise HTTPException(

@@ -30,7 +30,7 @@ def get_system_analytics(
     """
     Role-specific and date-bounded analytics aggregation directly in PostgreSQL.
     """
-    query = db.query(Ticket)
+    query = db.query(Ticket).filter(Ticket.deleted_at.is_(None))
 
     # Scoping for non-admins
     if role == "employee" and user_id:
@@ -62,6 +62,7 @@ def get_system_analytics(
     categories_raw = (
         db.query(Category.name, func.count(Ticket.id))
         .join(Ticket, Ticket.category_id == Category.id)
+        .filter(Ticket.deleted_at.is_(None), Category.deleted_at.is_(None))
         .group_by(Category.name)
         .all()
     )
@@ -81,10 +82,11 @@ def get_system_analytics(
     # Technician workload summary (for admin and technician views)
     tech_workload = []
     if role in ("admin", "technician"):
-        techs = db.query(User).filter(User.role.in_(["technician", "admin"])).all()
+        techs = db.query(User).filter(User.role.in_(["technician", "admin"]), User.deleted_at.is_(None)).all()
         for tech in techs:
             active = db.query(Ticket).filter(
                 Ticket.assigned_to == tech.id,
+                Ticket.deleted_at.is_(None),
                 Ticket.status.in_(["assigned", "in_progress", "pending"])
             ).count()
             tech_workload.append({

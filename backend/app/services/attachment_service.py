@@ -135,11 +135,11 @@ def get_attachment_for_download(
     user: User,
 ) -> Tuple[Attachment, Path]:
     attachment = db.get(Attachment, attachment_id)
-    if not attachment:
+    if not attachment or attachment.deleted_at is not None:
         raise ResourceNotFoundError("Attachment not found.")
 
     ticket = db.get(Ticket, attachment.ticket_id)
-    if not ticket:
+    if not ticket or ticket.deleted_at is not None:
         raise ResourceNotFoundError("Associated ticket not found.")
 
     check_ticket_access(user, ticket)

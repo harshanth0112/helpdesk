@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { RoleBadge, ApprovalStatusBadge } from '../components/Badges';
 import { Pagination } from '../components/TableControls';
@@ -16,9 +17,11 @@ import {
   Search,
   ArrowUpDown,
   Filter,
+  Trash2,
 } from 'lucide-react';
 
 export const UserManagementPage = () => {
+  const { user: currentAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'all' | 'active' | 'suspended'
   const [users, setUsers] = useState([]);
   const [pendingUsers, setPendingUsers] = useState([]);
@@ -46,11 +49,42 @@ export const UserManagementPage = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
 
+  // Soft delete modal
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
   // Confirmation modal for Approve / Suspend / Reactivate
   const [confirmAction, setConfirmAction] = useState(null);
 
   const [saving, setSaving] = useState(false);
   const { success, error } = useToast();
+
+  const handleConfirmDelete = async (e) => {
+    e.preventDefault();
+    if (!deleteTarget) return;
+    setSaving(true);
+    try {
+      await api.delete(`/admin/users/${deleteTarget.id}`, {
+        data: { deletion_reason: deleteReason.trim() || null },
+      });
+      success(`User ${deleteTarget.first_name} ${deleteTarget.last_name} (${deleteTarget.email}) soft-deleted successfully.`);
+      setIsDeleteModalOpen(false);
+      setDeleteTarget(null);
+      setDeleteReason('');
+      fetchAllData();
+    } catch (err) {
+      error(err.response?.data?.detail || 'Failed to soft delete user.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleOpenDeleteModal = (u) => {
+    setDeleteTarget(u);
+    setDeleteReason('');
+    setIsDeleteModalOpen(true);
+  };
 
   const fetchAllData = async () => {
     try {
@@ -525,6 +559,17 @@ export const UserManagementPage = () => {
                         Suspend
                       </button>
                     )}
+                    {u.email?.trim().toLowerCase() !== 'h641191@gmail.com' && currentAdmin?.id !== u.id && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDeleteModal(u)}
+                        className="px-2.5 py-1 text-xs font-mono uppercase tracking-wider border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                        title="Soft delete user account"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -621,6 +666,53 @@ export const UserManagementPage = () => {
               className="px-4 py-2 bg-red-600 text-white text-xs font-mono uppercase hover:bg-red-700 disabled:opacity-50"
             >
               {saving ? 'Rejecting...' : 'Confirm Reject'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Soft Delete User Modal */}
+      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Soft Delete User Account">
+        <form onSubmit={handleConfirmDelete} className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 text-xs font-mono text-red-800">
+            <Trash2 className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">
+                Soft-delete account: {deleteTarget?.first_name} {deleteTarget?.last_name} ({deleteTarget?.email})
+              </p>
+              <p className="mt-1 text-red-700">
+                This account will be deactivated and moved to the Admin Recycle Bin. All active sessions and refresh tokens will be revoked immediately. Historical tickets, comments, and audit logs are preserved.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-mono uppercase text-neutral-700 mb-1">
+              Reason for Deletion (Optional)
+            </label>
+            <textarea
+              rows={3}
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Audit reason for account deletion..."
+              className="w-full p-2.5 border border-neutral-300 text-xs rounded-none focus:outline-none focus:border-black font-mono"
+            />
+          </div>
+
+          <div className="pt-4 border-t border-neutral-200 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsDeleteModalOpen(false)}
+              className="px-4 py-2 border border-neutral-300 text-xs font-mono uppercase hover:bg-neutral-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 bg-red-600 text-white text-xs font-mono uppercase hover:bg-red-700 disabled:opacity-50 font-semibold"
+            >
+              {saving ? 'Deleting...' : 'Confirm Soft Delete'}
             </button>
           </div>
         </form>

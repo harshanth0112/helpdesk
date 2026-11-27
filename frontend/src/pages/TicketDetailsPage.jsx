@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
@@ -16,10 +16,12 @@ import {
   Download,
   Upload,
   FileText,
+  Trash2,
 } from 'lucide-react';
 
 export const TicketDetailsPage = () => {
   const { ticketId } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { success, error } = useToast();
 
@@ -47,6 +49,13 @@ export const TicketDetailsPage = () => {
   // Admin assignment state
   const [assigneeId, setAssigneeId] = useState('');
   const [technicians, setTechnicians] = useState([]);
+
+  // Soft Delete modals state
+  const [deleteTicketModal, setDeleteTicketModal] = useState(false);
+  const [deleteCommentModal, setDeleteCommentModal] = useState(null);
+  const [deleteAttachmentModal, setDeleteAttachmentModal] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const fetchTicketData = async () => {
     try {
@@ -135,7 +144,7 @@ export const TicketDetailsPage = () => {
 
   const handleDownloadAttachment = async (att) => {
     try {
-      const res = await api.get(`/tickets/${ticketId}/attachments/${att.id}/download`, {
+      const res = await api.get(`/tickets/attachments/${att.id}/download`, {
         responseType: 'blob',
       });
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -147,6 +156,58 @@ export const TicketDetailsPage = () => {
       link.remove();
     } catch (err) {
       error('Failed to download attachment file.');
+    }
+  };
+
+  const handleDeleteTicket = async () => {
+    setDeleting(true);
+    try {
+      await api.delete(`/tickets/${ticketId}`, {
+        data: { deletion_reason: deleteReason.trim() || null },
+      });
+      success(`Ticket #${ticket.ticket_number} moved to Recycle Bin.`);
+      setDeleteTicketModal(false);
+      navigate(user?.role === 'admin' ? '/admin/tickets' : '/dashboard');
+    } catch (err) {
+      error(err.response?.data?.detail || 'Failed to delete ticket.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteComment = async () => {
+    if (!deleteCommentModal) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/tickets/${ticketId}/comments/${deleteCommentModal.id}`, {
+        data: { deletion_reason: deleteReason.trim() || null },
+      });
+      success('Comment moved to Recycle Bin.');
+      setDeleteCommentModal(null);
+      setDeleteReason('');
+      fetchTicketData();
+    } catch (err) {
+      error(err.response?.data?.detail || 'Failed to delete comment.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteAttachment = async () => {
+    if (!deleteAttachmentModal) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/tickets/${ticketId}/attachments/${deleteAttachmentModal.id}`, {
+        data: { deletion_reason: deleteReason.trim() || null },
+      });
+      success('Attachment moved to Recycle Bin.');
+      setDeleteAttachmentModal(null);
+      setDeleteReason('');
+      fetchTicketData();
+    } catch (err) {
+      error(err.response?.data?.detail || 'Failed to delete attachment.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -288,14 +349,29 @@ export const TicketDetailsPage = () => {
                         </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadAttachment(att)}
-                      className="p-1.5 hover:bg-white text-neutral-700 hover:text-black border border-transparent hover:border-neutral-300 shrink-0"
-                      title="Download file"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAttachment(att)}
+                        className="p-1.5 hover:bg-white text-neutral-700 hover:text-black border border-transparent hover:border-neutral-300"
+                        title="Download file"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                      {user?.role === 'admin' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeleteAttachmentModal(att);
+                            setDeleteReason('');
+                          }}
+                          className="p-1.5 hover:bg-red-50 text-red-600 border border-transparent hover:border-red-200"
+                          title="Soft delete attachment"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -332,9 +408,24 @@ export const TicketDetailsPage = () => {
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] font-mono text-neutral-500">
-                        {new Date(c.created_at).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono text-neutral-500">
+                          {new Date(c.created_at).toLocaleString()}
+                        </span>
+                        {user?.role === 'admin' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteCommentModal(c);
+                              setDeleteReason('');
+                            }}
+                            className="p-1 hover:bg-red-50 text-neutral-400 hover:text-red-600 transition-colors"
+                            title="Soft delete comment"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-neutral-800 leading-relaxed whitespace-pre-wrap">{c.comment_text}</p>
                   </div>
@@ -531,6 +622,32 @@ export const TicketDetailsPage = () => {
                   </button>
                 </div>
               )}
+
+              {/* Admin Soft Delete Ticket */}
+              {user?.role === 'admin' && (
+                <div className="pt-4 border-t border-neutral-200 space-y-2">
+                  <label className="block text-xs font-mono uppercase text-red-600 font-semibold">
+                    Danger Zone
+                  </label>
+                  {ticket.status === 'resolved' || ticket.status === 'closed' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteTicketModal(true);
+                        setDeleteReason('');
+                      }}
+                      className="w-full py-2.5 border border-red-300 text-red-700 hover:bg-red-50 text-xs font-mono uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Soft Delete Ticket
+                    </button>
+                  ) : (
+                    <p className="text-[11px] font-mono text-neutral-400">
+                      Ticket must be resolved or closed before deletion.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -562,6 +679,129 @@ export const TicketDetailsPage = () => {
               className="px-4 py-2 bg-black text-white text-xs font-mono uppercase hover:bg-neutral-800 disabled:opacity-50"
             >
               {updatingStatus ? 'Updating...' : 'Confirm Transition'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Ticket Confirmation Modal */}
+      <Modal
+        isOpen={deleteTicketModal}
+        onClose={() => setDeleteTicketModal(false)}
+        title="Soft Delete Ticket"
+      >
+        <div className="space-y-4 text-xs font-mono">
+          <div className="p-3 bg-red-50 border border-red-200 text-red-800">
+            <p className="font-semibold">Move Ticket #{ticket.ticket_number} to Recycle Bin?</p>
+            <p className="mt-1 text-red-700">
+              The ticket will be hidden from normal lists. All comments, attachments, and history remain intact and can be restored from the Recycle Bin.
+            </p>
+          </div>
+          <div>
+            <label className="block uppercase text-neutral-600 mb-1">Reason for Deletion (Optional)</label>
+            <textarea
+              rows={2}
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Reason for archiving/deleting..."
+              className="w-full p-2 border border-neutral-300 text-xs rounded-none focus:outline-none focus:border-black font-mono"
+            />
+          </div>
+          <div className="pt-3 border-t border-neutral-200 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setDeleteTicketModal(false)}
+              className="px-4 py-2 border border-neutral-300 uppercase hover:bg-neutral-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={handleDeleteTicket}
+              className="px-4 py-2 bg-red-600 text-white uppercase hover:bg-red-700 disabled:opacity-50 font-semibold"
+            >
+              {deleting ? 'Deleting...' : 'Confirm Soft Delete'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Comment Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(deleteCommentModal)}
+        onClose={() => setDeleteCommentModal(null)}
+        title="Soft Delete Comment"
+      >
+        <div className="space-y-4 text-xs font-mono">
+          <p>
+            Move comment #{deleteCommentModal?.id} to the Recycle Bin?
+          </p>
+          <div>
+            <label className="block uppercase text-neutral-600 mb-1">Reason for Deletion (Optional)</label>
+            <textarea
+              rows={2}
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Audit reason..."
+              className="w-full p-2 border border-neutral-300 text-xs rounded-none focus:outline-none focus:border-black font-mono"
+            />
+          </div>
+          <div className="pt-3 border-t border-neutral-200 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setDeleteCommentModal(null)}
+              className="px-4 py-2 border border-neutral-300 uppercase hover:bg-neutral-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={handleDeleteComment}
+              className="px-4 py-2 bg-red-600 text-white uppercase hover:bg-red-700 disabled:opacity-50 font-semibold"
+            >
+              {deleting ? 'Deleting...' : 'Confirm Soft Delete'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Attachment Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(deleteAttachmentModal)}
+        onClose={() => setDeleteAttachmentModal(null)}
+        title="Soft Delete Attachment"
+      >
+        <div className="space-y-4 text-xs font-mono">
+          <p>
+            Move attachment "{deleteAttachmentModal?.file_name}" to the Recycle Bin? The file is kept on server storage.
+          </p>
+          <div>
+            <label className="block uppercase text-neutral-600 mb-1">Reason for Deletion (Optional)</label>
+            <textarea
+              rows={2}
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Audit reason..."
+              className="w-full p-2 border border-neutral-300 text-xs rounded-none focus:outline-none focus:border-black font-mono"
+            />
+          </div>
+          <div className="pt-3 border-t border-neutral-200 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setDeleteAttachmentModal(null)}
+              className="px-4 py-2 border border-neutral-300 uppercase hover:bg-neutral-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={handleDeleteAttachment}
+              className="px-4 py-2 bg-red-600 text-white uppercase hover:bg-red-700 disabled:opacity-50 font-semibold"
+            >
+              {deleting ? 'Deleting...' : 'Confirm Soft Delete'}
             </button>
           </div>
         </div>

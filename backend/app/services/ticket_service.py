@@ -95,7 +95,7 @@ def create_ticket(db: Session, payload: TicketCreate, user: User) -> Ticket:
 
 def get_ticket_by_id(db: Session, ticket_id: int, user: User) -> Ticket:
     ticket = db.get(Ticket, ticket_id)
-    if not ticket:
+    if not ticket or ticket.deleted_at is not None:
         raise ResourceNotFoundError("Ticket not found.")
     check_ticket_access(user, ticket)
     return ticket
@@ -119,11 +119,12 @@ def list_tickets_paginated(
     Paginated, searched, filtered, and sorted ticket listing with global visibility.
     All active/approved roles (Employee, Technician, Admin) can view all tickets.
     Optional requester_id and assigned_to filters allow scoped views (e.g. 'My Tickets').
+    Excludes soft-deleted tickets.
     """
     page = max(1, page)
     page_size = min(max(1, page_size), 100)  # Bound between 1 and 100
 
-    query = db.query(Ticket)
+    query = db.query(Ticket).filter(Ticket.deleted_at.is_(None))
 
     # 1. Search query (title and description)
     if search and search.strip():
@@ -280,7 +281,7 @@ def assign_ticket(db: Session, ticket_id: int, payload: TicketAssignUpdate, user
     # Validate that assigned_to is actually a technician or admin
     if payload.assigned_to is not None:
         tech = db.get(User, payload.assigned_to)
-        if not tech or tech.role not in ("technician", "admin") or not tech.is_active:
+        if not tech or tech.role not in ("technician", "admin") or not tech.is_active or tech.deleted_at is not None:
             raise PermissionDeniedError("Target assignee must be an active technician or administrator.")
 
     old_values = {"assigned_to": ticket.assigned_to, "status": ticket.status}

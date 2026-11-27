@@ -30,6 +30,13 @@ class User(Base, TimestampMixin):
     failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Soft delete metadata — added Phase 15
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    deletion_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Relationships
     requested_tickets: Mapped[List["Ticket"]] = relationship(
         "Ticket",
@@ -43,15 +50,18 @@ class User(Base, TimestampMixin):
     )
     comments: Mapped[List["Comment"]] = relationship(
         "Comment",
-        back_populates="user"
+        back_populates="user",
+        foreign_keys="Comment.user_id"
     )
     attachments: Mapped[List["Attachment"]] = relationship(
         "Attachment",
-        back_populates="uploader"
+        back_populates="uploader",
+        foreign_keys="Attachment.uploaded_by"
     )
     audit_logs: Mapped[List["AuditLog"]] = relationship(
         "AuditLog",
-        back_populates="actor"
+        back_populates="actor",
+        foreign_keys="AuditLog.actor_id"
     )
     refresh_tokens: Mapped[List["RefreshToken"]] = relationship(
         "RefreshToken",

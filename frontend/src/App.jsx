@@ -20,6 +20,7 @@ import { TicketDetailsPage } from './pages/TicketDetailsPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { CategoryManagementPage } from './pages/CategoryManagementPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
+import { RecycleBinPage } from './pages/RecycleBinPage';
 import { ProfilePage } from './pages/ProfilePage';
 
 export default function App() {
@@ -179,6 +180,16 @@ export default function App() {
                 <ProtectedRoute allowedRoles={['admin']}>
                   <DashboardLayout>
                     <AuditLogsPage />
+                  </DashboardLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/recycle-bin"
+              element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <DashboardLayout>
+                    <RecycleBinPage />
                   </DashboardLayout>
                 </ProtectedRoute>
               }

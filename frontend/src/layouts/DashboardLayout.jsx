@@ -9,6 +9,7 @@ import {
   FolderTree,
   BarChart3,
   FileText,
+  Trash2,
   Settings,
   LogOut,
   Menu,
@@ -42,6 +43,7 @@ export const DashboardLayout = ({ children }) => {
         { name: 'Categories', path: '/admin/categories', icon: FolderTree },
         { name: 'Analytics', path: '/admin/analytics', icon: BarChart3 },
         { name: 'Audit Logs', path: '/admin/audit-logs', icon: FileText },
+        { name: 'Recycle Bin', path: '/admin/recycle-bin', icon: Trash2 },
         { name: 'Profile & Settings', path: '/profile', icon: Settings },
       ];
     }

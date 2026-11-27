@@ -38,6 +38,13 @@ class Ticket(Base, TimestampMixin):
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Soft delete metadata — added Phase 15
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    deletion_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Relationships
     category: Mapped["Category"] = relationship(
         "Category",

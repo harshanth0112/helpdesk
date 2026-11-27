@@ -107,7 +107,7 @@ def authenticate_user(db: Session, email: str, password: str) -> User:
     _GENERIC_MSG = "Invalid email or password."
 
     user: User | None = db.query(User).filter(User.email == email.lower()).first()
-    if user is None:
+    if user is None or user.deleted_at is not None:
         # Perform a dummy hash to maintain consistent timing
         verify_password(password, "$argon2id$v=19$m=65536,t=3,p=4$dummy$dummy")
         raise ValueError(_GENERIC_MSG)
@@ -268,7 +268,12 @@ def rotate_refresh_token(
 
     # Load user and issue a new pair
     user: User | None = db.get(User, db_token.user_id)
-    if user is None or not user.is_active or user.approval_status != "approved":
+    if (
+        user is None
+        or user.deleted_at is not None
+        or not user.is_active
+        or user.approval_status != "approved"
+    ):
         raise ValueError(_GENERIC_MSG)
 
     return create_token_pair(db, user, ip_address=ip_address, user_agent=user_agent)
@@ -311,7 +316,7 @@ def initiate_password_reset(db: Session, email: str) -> str | None:
     Replace with email dispatch in production.
     """
     user: User | None = db.query(User).filter(User.email == email.lower()).first()
-    if user is None or not user.is_active:
+    if user is None or user.deleted_at is not None or not user.is_active:
         return None
 
     raw_token = generate_secure_token()
@@ -359,7 +364,7 @@ def complete_password_reset(db: Session, raw_token: str, new_password: str) -> N
         raise ValueError(_GENERIC_MSG)
 
     user: User | None = db.get(User, db_token.user_id)
-    if user is None or not user.is_active:
+    if user is None or user.deleted_at is not None or not user.is_active:
         raise ValueError(_GENERIC_MSG)
 
     user.password_hash = get_password_hash(new_password)

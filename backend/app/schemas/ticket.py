@@ -194,3 +194,54 @@ class CategoryResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Soft Delete & Recycle Bin Schemas (Phase 15)
+# ---------------------------------------------------------------------------
+
+class SoftDeleteRequest(BaseModel):
+    deletion_reason: Optional[str] = Field(None, max_length=500)
+
+
+class AttachmentResponse(BaseModel):
+    id: int
+    ticket_id: int
+    uploaded_by: int
+    file_name: str
+    file_size_bytes: int
+    mime_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RecycleBinItemResponse(BaseModel):
+    id: int
+    entity: str
+    identifier: str
+    title: str
+    subtitle: str
+    status: str
+    deletion_status: str
+    deleted_at: datetime
+    deleted_by: Optional[int] = None
+    deleted_by_name: Optional[str] = None
+    deleted_by_email: Optional[str] = None
+    deletion_reason: Optional[str] = None
+
+
+class PaginatedRecycleBinResponse(BaseModel):
+    entity: str
+    items: List[RecycleBinItemResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class RestoreResponse(BaseModel):
+    status: str
+    entity: str
+    id: int
+    restored_by: int

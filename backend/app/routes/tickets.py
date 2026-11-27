@@ -3,7 +3,7 @@ app/routes/tickets.py - Comprehensive Secure Ticket CRUD and Workflow APIs.
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -11,11 +11,14 @@ from app.db.session import get_db
 from app.models.user import User
 from app.models.ticket import Ticket
 from app.models.comment import Comment
-from app.core.dependencies import get_current_user
+from app.models.attachment import Attachment
+from app.models.category import Category
+from app.core.dependencies import get_current_user, require_role
 from app.core.exceptions import ResourceNotFoundError, PermissionDeniedError
 from app.core.permissions import check_ticket_comment_permission, check_ticket_access
 from app.services import ticket_service, attachment_service, notification_service
 from app.services.email_service import dispatch_email
+from app.services import soft_delete_service
 from app.schemas.ticket import (
     TicketCreate,
     TicketResponse,
@@ -27,6 +30,9 @@ from app.schemas.ticket import (
     TicketHistoryResponse,
     CommentCreate,
     CommentResponse,
+    AttachmentResponse,
+    CategoryResponse,
+    SoftDeleteRequest,
 )
 
 router = APIRouter(prefix="/api/v1/tickets", tags=["Tickets"])
@@ -44,7 +50,7 @@ def get_dashboard_stats(
     - Technician: queries scoped to assigned_to == user.id
     - Admin: queries across all tickets in database
     """
-    query = db.query(Ticket)
+    query = db.query(Ticket).filter(Ticket.deleted_at.is_(None))
     if current_user.role == "employee":
         query = query.filter(Ticket.requester_id == current_user.id)
     elif current_user.role == "technician":
@@ -63,7 +69,7 @@ def get_dashboard_stats(
 
     pending_users = 0
     if current_user.role == "admin":
-        pending_users = db.query(User).filter(User.approval_status == "pending").count()
+        pending_users = db.query(User).filter(User.approval_status == "pending", User.deleted_at.is_(None)).count()
 
     return {
         "total": total,
@@ -197,14 +203,41 @@ def patch_ticket_general(
     )
 
 
-@router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_ticket(
-    ticket_id: int,
+@router.get("/categories", response_model=List[CategoryResponse])
+def list_active_categories(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Delete / archive ticket according to retention rules (Admin-only, closed/resolved tickets)."""
-    ticket_service.delete_or_archive_ticket(db, ticket_id, current_user)
+    """Authenticated endpoint: list all active, non-deleted categories for ticket creation/filtering."""
+    return (
+        db.query(Category)
+        .filter(Category.is_active.is_(True), Category.deleted_at.is_(None))
+        .order_by(Category.name.asc())
+        .all()
+    )
+
+
+@router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_ticket(
+    ticket_id: int,
+    payload: Optional[SoftDeleteRequest] = None,
+    request: Request = None,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Soft delete a ticket (Admin-only, closed/resolved tickets)."""
+    reason = payload.deletion_reason if payload else None
+    ip_addr = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    soft_delete_service.soft_delete_ticket(
+        db=db,
+        ticket_id=ticket_id,
+        current_admin=current_admin,
+        deletion_reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+    return None
 
 
 @router.patch("/{ticket_id}/status", response_model=TicketResponse)
@@ -319,11 +352,39 @@ def get_comments(
     """List comments for a ticket."""
     ticket = ticket_service.get_ticket_by_id(db, ticket_id, current_user)
 
-    query = db.query(Comment).filter(Comment.ticket_id == ticket.id)
+    query = db.query(Comment).filter(
+        Comment.ticket_id == ticket.id,
+        Comment.deleted_at.is_(None),
+    )
     if current_user.role == "employee":
         query = query.filter(Comment.is_internal.is_(False))
 
     return query.order_by(Comment.created_at.asc()).all()
+
+
+@router.delete("/{ticket_id}/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_comment(
+    ticket_id: int,
+    comment_id: int,
+    payload: Optional[SoftDeleteRequest] = None,
+    request: Request = None,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: soft delete a comment."""
+    reason = payload.deletion_reason if payload else None
+    ip_addr = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    soft_delete_service.soft_delete_comment(
+        db=db,
+        ticket_id=ticket_id,
+        comment_id=comment_id,
+        current_admin=current_admin,
+        deletion_reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+    return None
 
 # ---------------------------------------------------------------------------
 # Attachments endpoints (Module 3)
@@ -346,6 +407,47 @@ async def upload_attachment(
         "mime_type": attachment.mime_type,
         "created_at": attachment.created_at,
     }
+
+
+@router.get("/{ticket_id}/attachments", response_model=List[AttachmentResponse])
+def list_attachments(
+    ticket_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List active attachments for a ticket."""
+    ticket = ticket_service.get_ticket_by_id(db, ticket_id, current_user)
+    return (
+        db.query(Attachment)
+        .filter(Attachment.ticket_id == ticket.id, Attachment.deleted_at.is_(None))
+        .order_by(Attachment.created_at.asc())
+        .all()
+    )
+
+
+@router.delete("/{ticket_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    payload: Optional[SoftDeleteRequest] = None,
+    request: Request = None,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: soft delete an attachment (preserves file on disk)."""
+    reason = payload.deletion_reason if payload else None
+    ip_addr = request.client.host if request and request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    soft_delete_service.soft_delete_attachment(
+        db=db,
+        attachment_id=attachment_id,
+        current_admin=current_admin,
+        ticket_id=ticket_id,
+        deletion_reason=reason,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+    return None
 
 
 @router.get("/attachments/{attachment_id}/download")
