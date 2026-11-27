@@ -338,7 +338,7 @@ def test_status_transitions_and_history(client, db_session):
 
 
 def test_delete_and_retention_rules(client, db_session):
-    """Admin can only delete closed or resolved tickets; active cannot be deleted."""
+    """Admin can delete tickets (even active/unclosed); employee cannot delete tickets."""
     cat = create_category(db_session, "Audio")
     admin, admin_token = create_user(db_session, "admin_del@test.com", "admin")
     emp, emp_token = create_user(db_session, "emp_del@test.com", "employee")
@@ -351,21 +351,53 @@ def test_delete_and_retention_rules(client, db_session):
     )
     ticket_id = r_create.json()["id"]
 
-    # Active ticket cannot be deleted
-    r_del_active = client.delete(f"/api/v1/tickets/{ticket_id}", headers=admin_headers)
-    assert r_del_active.status_code == 403
-
-    # Close ticket
-    client.patch(f"/api/v1/tickets/{ticket_id}/status", json={"status": "closed"}, headers=admin_headers)
-
-    # Employee cannot delete closed ticket
+    # Employee cannot delete ticket (403)
     r_emp_del = client.delete(f"/api/v1/tickets/{ticket_id}", headers={"Authorization": f"Bearer {emp_token}"})
     assert r_emp_del.status_code == 403
 
-    # Admin deletes closed ticket
+    # Admin CAN delete active (unclosed) ticket (204)
     r_admin_del = client.delete(f"/api/v1/tickets/{ticket_id}", headers=admin_headers)
     assert r_admin_del.status_code == 204
 
-    # Verify gone
+    # Verify gone from active queries
     r_get = client.get(f"/api/v1/tickets/{ticket_id}", headers=admin_headers)
     assert r_get.status_code == 404
+
+
+def test_create_ticket_with_tagged_team_members(client, db_session):
+    """Verify creating a ticket with tagged team members creates in-app notifications and mentions."""
+    cat = create_category(db_session, "Hardware")
+    requester, req_token = create_user(db_session, "author@test.com", "employee")
+    colleague1, _ = create_user(db_session, "colleague1@test.com", "employee")
+    colleague2, _ = create_user(db_session, "colleague2@test.com", "technician")
+
+    headers = {"Authorization": f"Bearer {req_token}"}
+
+    # 1. Test team-members listing
+    r_members = client.get("/api/v1/tickets/team-members", headers=headers)
+    assert r_members.status_code == 200
+    member_ids = [m["id"] for m in r_members.json()]
+    assert colleague1.id in member_ids
+    assert colleague2.id in member_ids
+
+    # 2. Create ticket with tagged_user_ids
+    r_create = client.post(
+        "/api/v1/tickets",
+        json={
+            "title": "Need second monitor for dev setup",
+            "description": "Please approve additional display for development team workstation.",
+            "category_id": cat.id,
+            "priority": "low",
+            "tagged_user_ids": [colleague1.id, colleague2.id],
+        },
+        headers=headers,
+    )
+    assert r_create.status_code == 201
+    ticket_id = r_create.json()["id"]
+
+    # 3. Verify comments have tag mention
+    r_comments = client.get(f"/api/v1/tickets/{ticket_id}/comments", headers=headers)
+    assert r_comments.status_code == 200
+    comments = r_comments.json()
+    assert any("Tagged team members" in c["comment_text"] for c in comments)
+

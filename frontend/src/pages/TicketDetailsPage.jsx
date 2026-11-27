@@ -629,23 +629,17 @@ export const TicketDetailsPage = () => {
                   <label className="block text-xs font-mono uppercase text-red-600 font-semibold">
                     Danger Zone
                   </label>
-                  {ticket.status === 'resolved' || ticket.status === 'closed' ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteTicketModal(true);
-                        setDeleteReason('');
-                      }}
-                      className="w-full py-2.5 border border-red-300 text-red-700 hover:bg-red-50 text-xs font-mono uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Soft Delete Ticket
-                    </button>
-                  ) : (
-                    <p className="text-[11px] font-mono text-neutral-400">
-                      Ticket must be resolved or closed before deletion.
-                    </p>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteTicketModal(true);
+                      setDeleteReason('');
+                    }}
+                    className="w-full py-2.5 border border-red-300 text-red-700 hover:bg-red-50 text-xs font-mono uppercase tracking-wider font-semibold transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Soft Delete Ticket
+                  </button>
                 </div>
               )}
             </div>

@@ -76,6 +76,43 @@ def create_ticket(db: Session, payload: TicketCreate, user: User) -> Ticket:
     db.add(ticket)
     db.flush()
 
+    tagged_names = []
+    if payload.tagged_user_ids:
+        from app.services.notification_service import create_notification
+        from app.models.comment import Comment
+
+        tagged_users = (
+            db.query(User)
+            .filter(
+                User.id.in_(payload.tagged_user_ids),
+                User.is_active.is_(True),
+                User.approval_status == "approved",
+                User.deleted_at.is_(None),
+            )
+            .all()
+        )
+        for tu in tagged_users:
+            if tu.id != user.id:
+                create_notification(
+                    db=db,
+                    user_id=tu.id,
+                    ticket_id=ticket.id,
+                    title=f"Tagged in Ticket #{ticket.ticket_number}",
+                    message=f"{user.first_name} {user.last_name} tagged you in ticket '{ticket.title}'.",
+                    notification_type="mention",
+                )
+                tagged_names.append(f"@{tu.first_name} {tu.last_name}")
+
+        if tagged_names:
+            comment_text = f"Tagged team members: {', '.join(tagged_names)}"
+            tag_comment = Comment(
+                ticket_id=ticket.id,
+                user_id=user.id,
+                comment_text=comment_text,
+                is_internal=False,
+            )
+            db.add(tag_comment)
+
     log_audit(
         db,
         ticket_id=ticket.id,
@@ -86,6 +123,7 @@ def create_ticket(db: Session, payload: TicketCreate, user: User) -> Ticket:
             "status": ticket.status,
             "priority": ticket.priority,
             "category_id": ticket.category_id,
+            "tagged_users": tagged_names,
         },
     )
     db.commit()

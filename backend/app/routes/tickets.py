@@ -217,6 +217,34 @@ def list_active_categories(
     )
 
 
+@router.get("/team-members")
+def get_team_members(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Authenticated endpoint: list all active colleagues/team members for tagging in tickets."""
+    users = (
+        db.query(User)
+        .filter(
+            User.is_active.is_(True),
+            User.approval_status == "approved",
+            User.deleted_at.is_(None),
+        )
+        .order_by(User.first_name.asc(), User.last_name.asc())
+        .all()
+    )
+    return [
+        {
+            "id": u.id,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "email": u.email,
+            "role": u.role,
+        }
+        for u in users
+    ]
+
+
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_ticket(
     ticket_id: int,
@@ -225,7 +253,7 @@ def delete_ticket(
     current_admin: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    """Soft delete a ticket (Admin-only, closed/resolved tickets)."""
+    """Soft delete a ticket (Admin-only)."""
     reason = payload.deletion_reason if payload else None
     ip_addr = request.client.host if request and request.client else None
     user_agent = request.headers.get("user-agent") if request else None

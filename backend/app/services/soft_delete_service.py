@@ -188,7 +188,7 @@ def soft_delete_ticket(
     current_admin: Optional[User] = None,
     deletion_reason: Optional[str] = None,
 ) -> Ticket:
-    """Soft-delete a closed/resolved ticket (Admin-only) without cascading to child rows."""
+    """Soft-delete a ticket (Admin-only) without cascading to child rows."""
     effective_admin = actor or current_admin
     effective_reason = reason if reason is not None else deletion_reason
     _require_admin(effective_admin)
@@ -201,11 +201,6 @@ def soft_delete_ticket(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Ticket is already deleted.",
-        )
-
-    if ticket.status not in ("closed", "resolved"):
-        raise PermissionDeniedError(
-            "Cannot delete an active ticket. Please close or resolve the ticket first."
         )
 
     now = datetime.now(timezone.utc)

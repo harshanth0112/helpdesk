@@ -36,6 +36,7 @@ class TicketCreate(BaseModel):
     description: str = Field(..., min_length=5)
     category_id: int
     priority: str = Field(default="medium")
+    tagged_user_ids: Optional[List[int]] = Field(default=None)
 
     @field_validator("priority")
     @classmethod

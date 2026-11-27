@@ -256,10 +256,9 @@ def test_ticket_soft_delete_retention(db):
     with pytest.raises(PermissionDeniedError):
         soft_delete_ticket(db, closed_ticket.id, emp)
 
-    # Active ticket ('open') cannot be deleted
-    with pytest.raises(PermissionDeniedError) as exc_info:
-        soft_delete_ticket(db, open_ticket.id, admin)
-    assert "close or resolve" in str(exc_info.value).lower()
+    # Admin CAN soft delete active/open ticket
+    soft_delete_ticket(db, open_ticket.id, admin, "Active deletion by admin")
+    assert open_ticket.deleted_at is not None
 
     # Admin soft deletes closed ticket
     soft_delete_ticket(db, closed_ticket.id, admin, "Retention expired")
