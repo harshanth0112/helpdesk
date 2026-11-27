@@ -47,3 +47,7 @@ Thumbs.db
 
 # ----- Uploads (local only, served from cloud in production) --
 uploads/
+
+# ----- Playwright / MCP Artifacts ------------------------------
+.playwright-mcp/
+
