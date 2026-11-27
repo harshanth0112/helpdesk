@@ -1,0 +1,49 @@
+# ============================================================
+# Root .gitignore — Smart IT Helpdesk Management System
+# ============================================================
+
+# ----- Environment / Secrets (NEVER commit) ----------------
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+
+# Keep example files so developers know what vars exist
+!.env.example
+!.env.production.example
+
+# ----- Python --------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+htmlcov/
+.coverage
+coverage.xml
+
+# ----- Node / Frontend ----------------------------------------
+node_modules/
+frontend/dist/
+frontend/.cache/
+
+# ----- OS / Editor --------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# ----- Uploads (local only, served from cloud in production) --
+uploads/

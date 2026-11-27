@@ -1,0 +1,150 @@
+{
+  "name": "Smart IT Helpdesk - Gmail Email Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "helpdesk/send-email",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "smart-helpdesk-send-email",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "cred-helpdesk-secret",
+          "name": "Helpdesk Header Auth (X-Helpdesk-Secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Validate Email Payload & Security Sanitization\n * Enforces strict schema, rejects unauthorized SMTP injection,\n * and renders professional HTML email templates with inline CSS.\n *\n * Brand colors:\n *   Primary blue : #2563EB\n *   Dark navy    : #172554\n *   Background   : #F3F6FB\n *   Success green: #16A34A\n *   Warning amber: #D97706\n *   Error red    : #DC2626\n *   Text dark    : #1E293B\n *   Text muted   : #64748B\n */\n\nconst payload = $json.body || $json;\n\n// 1. Allowed keys strictly matching supported schema\nconst ALLOWED_KEYS = new Set([\n  'to', 'subject', 'message', 'email_type', 'template',\n  'recipient_name', 'sender_name', 'reply_to', 'template_data'\n]);\n\nfor (const key of Object.keys(payload)) {\n  if (!ALLOWED_KEYS.has(key)) {\n    return [{ json: { isValid: false, statusCode: 400,\n      errorMessage: `Disallowed payload attribute: '${key}'` } }];\n  }\n}\n\n// 2. Validate recipient email\nconst emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;\nif (!payload.to || typeof payload.to !== 'string' || !emailRegex.test(payload.to.trim())) {\n  return [{ json: { isValid: false, statusCode: 400,\n    errorMessage: \"Field 'to' must be a single valid email address.\" } }];\n}\n\n// 3. Validate reply_to if provided\nif (payload.reply_to && (typeof payload.reply_to !== 'string' || !emailRegex.test(payload.reply_to.trim()))) {\n  return [{ json: { isValid: false, statusCode: 400,\n    errorMessage: \"Field 'reply_to' must be a valid email address.\" } }];\n}\n\n// 4. Validate email_type\nconst emailType = (payload.email_type || 'html').toLowerCase();\nif (!['html', 'text'].includes(emailType)) {\n  return [{ json: { isValid: false, statusCode: 400,\n    errorMessage: \"Field 'email_type' must be 'html' or 'text'.\" } }];\n}\n\n// 5. HTML wrapper helper — table-based layout, inline CSS, responsive-safe\nconst e = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');\n\nconst BADGE_COLORS = {\n  open:        { bg:'#DBEAFE', text:'#1D4ED8' },\n  assigned:    { bg:'#E0E7FF', text:'#4338CA' },\n  in_progress: { bg:'#FEF9C3', text:'#854D0E' },\n  pending:     { bg:'#FEF3C7', text:'#92400E' },\n  resolved:    { bg:'#DCFCE7', text:'#15803D' },\n  closed:      { bg:'#F1F5F9', text:'#475569' },\n  low:         { bg:'#F0FDF4', text:'#15803D' },\n  medium:      { bg:'#FEF9C3', text:'#854D0E' },\n  high:        { bg:'#FEF3C7', text:'#92400E' },\n  critical:    { bg:'#FEE2E2', text:'#991B1B' }\n};\n\nconst badge = (label) => {\n  const key = String(label || '').toLowerCase().replace(/ /g,'_');\n  const c = BADGE_COLORS[key] || { bg:'#E2E8F0', text:'#475569' };\n  return `<span style=\"display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;background:${c.bg};color:${c.text}\">${e(label)}</span>`;\n};\n\nconst htmlWrap = (accentColor, iconEmoji, titleText, bodyHtml) => `<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>${e(titleText)}</title></head>\n<body style=\"margin:0;padding:0;background:#F3F6FB;font-family:'Segoe UI',Arial,sans-serif\">\n<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#F3F6FB;padding:32px 0\">\n<tr><td align=\"center\">\n<table width=\"580\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:580px;width:100%\">\n  <!-- Header -->\n  <tr><td style=\"background:${accentColor};border-radius:12px 12px 0 0;padding:28px 36px;text-align:center\">\n    <div style=\"font-size:32px;margin-bottom:8px\">${iconEmoji}</div>\n    <div style=\"color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.3px\">${e(titleText)}</div>\n    <div style=\"color:rgba(255,255,255,0.75);font-size:12px;margin-top:4px\">Smart IT Helpdesk</div>\n  </td></tr>\n  <!-- Body -->\n  <tr><td style=\"background:#fff;padding:36px;border-left:1px solid #E2E8F0;border-right:1px solid #E2E8F0\">\n    ${bodyHtml}\n  </td></tr>\n  <!-- Footer -->\n  <tr><td style=\"background:#F8FAFC;border:1px solid #E2E8F0;border-top:0;border-radius:0 0 12px 12px;padding:20px 36px;text-align:center\">\n    <div style=\"color:#94A3B8;font-size:11px;line-height:1.6\">\n      This is an automated message from <strong>Smart IT Helpdesk</strong>.<br>\n      Please do not reply to this email.\n    </div>\n  </td></tr>\n</table>\n</td></tr>\n</table>\n</body></html>`;\n\nconst greeting = (name) =>\n  `<p style=\"margin:0 0 16px;font-size:16px;color:#1E293B\">Hello <strong>${e(name)}</strong>,</p>`;\n\nconst divider = `<hr style=\"border:none;border-top:1px solid #E2E8F0;margin:24px 0\">`;\n\nconst infoRow = (label, value) =>\n  `<tr><td style=\"padding:8px 12px;font-size:13px;color:#64748B;font-weight:500;width:120px\">${e(label)}</td>\n   <td style=\"padding:8px 12px;font-size:13px;color:#1E293B\">${value}</td></tr>`;\n\nconst infoTable = (rows) =>\n  `<table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;margin:16px 0\">${rows}</table>`;\n\nconst ctaButton = (url, label, color) =>\n  `<div style=\"text-align:center;margin:28px 0\">\n    <a href=\"${url}\" style=\"display:inline-block;background:${color || '#2563EB'};color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 28px;border-radius:8px;letter-spacing:0.2px\">${e(label)}</a>\n  </div>`;\n\n// 6. Template rendering\nlet finalSubject = (payload.subject || '').trim();\nlet finalMessage = (payload.message || '').trim();\nconst recipientName = (payload.recipient_name || 'Team Member').trim();\nconst templateData = payload.template_data || {};\n\nif (payload.template) {\n  switch (payload.template) {\n\n    case 'account_registration': {\n      finalSubject = finalSubject || 'Registration Received - Smart IT Helpdesk';\n      if (emailType === 'html') {\n        finalMessage = htmlWrap(\n          '#2563EB', '📋', 'Registration Received',\n          greeting(recipientName) +\n          `<p style=\"margin:0 0 20px;color:#475569;font-size:15px;line-height:1.6\">\n            Thank you for registering with the Smart IT Helpdesk system.\n            Your account has been received and is currently <strong>pending administrator review</strong>.\n          </p>` +\n          infoTable(\n            infoRow('Status', badge('pending')) +\n            infoRow('Next step', 'Await admin approval email')\n          ) +\n          `<p style=\"margin:20px 0 0;color:#64748B;font-size:13px;line-height:1.6\">\n            You will receive another notification once an administrator has reviewed your registration.\n            This process typically takes up to one business day.\n          </p>`\n        );\n      } else {\n        finalMessage = `Hello ${recipientName},\\n\\nYour Smart IT Helpdesk account registration has been received.\\nYour account is pending administrator approval.\\nYou will receive another email once your account is reviewed.\\n\\nRegards,\\nSmart IT Helpdesk Team`;\n      }\n      break;\n    }\n\n    case 'account_approval': {\n      finalSubject = finalSubject || 'Your Helpdesk Account Has Been Approved';\n      const role = e(templateData.role || 'employee');\n      if (emailType === 'html') {\n        finalMessage = htmlWrap(\n          '#16A34A', '✅', 'Account Approved',\n          greeting(recipientName) +\n          `<p style=\"margin:0 0 20px;color:#475569;font-size:15px;line-height:1.6\">\n            Great news! Your Smart IT Helpdesk account has been <strong>approved</strong>.\n            You can now log in and start using the platform.\n          </p>` +\n          infoTable(\n            infoRow('Status', badge('resolved')) +\n            infoRow('Role assigned', `<strong style=\"text-transform:capitalize\">${role}</strong>`)\n          ) +\n          ctaButton('#', 'Log In to Smart IT Helpdesk', '#16A34A') +\n          divider +\n          `<p style=\"margin:0;color:#64748B;font-size:12px\">If the button above does not work, please open the application directly.</p>`\n        );\n      } else {\n        finalMessage = `Hello ${recipientName},\\n\\nYour Smart IT Helpdesk account has been approved.\\nRole: ${role}\\n\\nYou can now log in to the application.\\n\\nRegards,\\nSmart IT Helpdesk Team`;\n      }\n      break;\n    }\n\n    case 'account_rejection': {\n      finalSubject = finalSubject || 'Helpdesk Account Registration Update';\n      const reason = e(templateData.rejection_reason || '');\n      if (emailType === 'html') {\n        finalMessage = htmlWrap(\n          '#DC2626', '❌', 'Registration Not Approved',\n          greeting(recipientName) +\n          `<p style=\"margin:0 0 20px;color:#475569;font-size:15px;line-height:1.6\">\n            Thank you for your interest in the Smart IT Helpdesk system.\n            Unfortunately, your registration has <strong>not been approved</strong> at this time.\n          </p>` +\n          (reason ? infoTable(infoRow('Reason', `<span style=\"color:#DC2626\">${reason}</span>`)) : '') +\n          `<p style=\"margin:20px 0 0;color:#64748B;font-size:13px;line-height:1.6\">\n            If you believe this was an error or require further information,\n            please contact your IT administrator directly.\n          </p>`\n        );\n      } else {\n        finalMessage = `Hello ${recipientName},\\n\\nYour Smart IT Helpdesk registration has not been approved.${reason ? '\\nReason: ' + reason : ''}\\n\\nPlease contact your IT administrator for more information.\\n\\nRegards,\\nSmart IT Helpdesk Team`;\n      }\n      break;\n    }\n\n    case 'ticket_assignment': {\n      finalSubject = finalSubject || 'New Support Ticket Assigned to You';\n      const ticketId    = e(templateData.ticket_id || 'N/A');\n      const ticketTitle = e(templateData.ticket_title || 'Untitled Ticket');\n      const priority    = e(templateData.ticket_priority || 'medium');\n      if (emailType === 'html') {\n        finalMessage = htmlWrap(\n          '#7C3AED', '🎫', 'Ticket Assigned to You',\n          greeting(recipientName) +\n          `<p style=\"margin:0 0 20px;color:#475569;font-size:15px;line-height:1.6\">\n            A support ticket has been assigned to you and requires your attention.\n          </p>` +\n          infoTable(\n            infoRow('Ticket ID', `<strong>${ticketId}</strong>`) +\n            infoRow('Title', ticketTitle) +\n            infoRow('Priority', badge(priority)) +\n            infoRow('Action', 'Log in to review and respond')\n          ) +\n          ctaButton('#', 'View Ticket', '#7C3AED') +\n          `<p style=\"margin:0;color:#64748B;font-size:12px\">Please acknowledge and begin working on this ticket promptly.</p>`\n        );\n      } else {\n        finalMessage = `Hello ${recipientName},\\n\\nA support ticket has been assigned to you.\\nTicket ID: ${ticketId}\\nTitle: ${ticketTitle}\\nPriority: ${priority}\\n\\nPlease log in to the Smart IT Helpdesk to review and handle this ticket.\\n\\nRegards,\\nSmart IT Helpdesk Team`;\n      }\n      break;\n    }\n\n    case 'ticket_status_update': {\n      finalSubject = finalSubject || 'Your Support Ticket Has Been Updated';\n      const sTicketId    = e(templateData.ticket_id || 'N/A');\n      const sTicketTitle = e(templateData.ticket_title || 'Untitled Ticket');\n      const newStatus    = e(templateData.new_status || templateData.status || 'updated');\n      if (emailType === 'html') {\n        finalMessage = htmlWrap(\n          '#0891B2', '🔄', 'Ticket Status Updated',\n          greeting(recipientName) +\n          `<p style=\"margin:0 0 20px;color:#475569;font-size:15px;line-height:1.6\">\n            There has been an update to one of your support tickets.\n          </p>` +\n          infoTable(\n            infoRow('Ticket ID', `<strong>${sTicketId}</strong>`) +\n            infoRow('Title', sTicketTitle) +\n            infoRow('New Status', badge(newStatus))\n          ) +\n          ctaButton('#', 'View Ticket Details', '#0891B2') +\n          `<p style=\"margin:0;color:#64748B;font-size:12px\">Log in to the helpdesk portal to view the full ticket history and respond.</p>`\n        );\n      } else {\n        finalMessage = `Hello ${recipientName},\\n\\nYour support ticket has been updated.\\nTicket ID: ${sTicketId}\\nTitle: ${sTicketTitle}\\nNew Status: ${newStatus}\\n\\nPlease log in to view the latest details.\\n\\nRegards,\\nSmart IT Helpdesk Team`;\n      }\n      break;\n    }\n\n    case 'password_reset': {\n      finalSubject = finalSubject || 'Reset Your Smart IT Helpdesk Password';\n      const resetUrl = String(templateData.reset_url || '').trim();\n      if (!resetUrl || (!resetUrl.startsWith('https://') && !resetUrl.startsWith('http://localhost'))) {\n        return [{ json: { isValid: false, statusCode: 400,\n          errorMessage: \"Field 'reset_url' in template_data must be a valid HTTPS URL.\" } }];\n      }\n      if (emailType === 'html') {\n        finalMessage = htmlWrap(\n          '#D97706', '🔑', 'Password Reset Request',\n          `<p style=\"margin:0 0 16px;font-size:16px;color:#1E293B\">Hello,</p>` +\n          `<p style=\"margin:0 0 20px;color:#475569;font-size:15px;line-height:1.6\">\n            We received a request to reset the password for your Smart IT Helpdesk account.\n            Click the button below to set a new password.\n          </p>` +\n          ctaButton(resetUrl, 'Reset My Password', '#D97706') +\n          infoTable(\n            infoRow('Link expires', '30 minutes') +\n            infoRow('One-time use', 'Yes — link becomes invalid after use')\n          ) +\n          divider +\n          `<p style=\"margin:0;color:#64748B;font-size:12px;line-height:1.6\">\n            If you did not request a password reset, you can safely ignore this email.\n            Your password will not change.\n          </p>`\n        );\n      } else {\n        finalMessage = `Hello,\\n\\nWe received a request to reset your Smart IT Helpdesk password.\\nReset link: ${resetUrl}\\n\\nThis link expires in 30 minutes and can only be used once.\\nIf you did not request this, ignore this email.\\n\\nRegards,\\nSmart IT Helpdesk Team`;\n      }\n      break;\n    }\n\n    default:\n      return [{ json: { isValid: false, statusCode: 400,\n        errorMessage: `Unknown template: '${payload.template}'.` } }];\n  }\n}\n\nif (!finalSubject) {\n  return [{ json: { isValid: false, statusCode: 400,\n    errorMessage: \"Email 'subject' cannot be empty.\" } }];\n}\nif (!finalMessage) {\n  return [{ json: { isValid: false, statusCode: 400,\n    errorMessage: \"Email 'message' cannot be empty.\" } }];\n}\n\nreturn [{\n  json: {\n    isValid: true,\n    to: payload.to.trim(),\n    subject: finalSubject,\n    message: finalMessage,\n    emailType: emailType,\n    isHtml: emailType === 'html',\n    replyTo: payload.reply_to ? payload.reply_to.trim() : undefined,\n    senderName: payload.sender_name ? payload.sender_name.trim() : 'Smart IT Helpdesk'\n  }\n}];"
+      },
+      "id": "node-validate-payload",
+      "name": "Validate Email Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isValid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "node-if-valid",
+      "name": "If Payload Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"error\": \"{{ $json.errorMessage || 'Invalid or malformed email request payload.' }}\"\n}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 400 }}"
+        }
+      },
+      "id": "node-respond-400",
+      "name": "Respond 400 Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 460]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "={{ $json.isHtml ? 'html' : 'text' }}",
+        "message": "={{ $json.message }}",
+        "options": {
+          "replyTo": "={{ $json.replyTo || undefined }}"
+        }
+      },
+      "id": "node-gmail-send",
+      "name": "Gmail - Send Message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [860, 240],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "cred-gmail-oauth2",
+          "name": "Helpdesk Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": true,\n  \"message\": \"Email accepted for sending\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-respond-200",
+      "name": "Respond 200 Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1100, 180]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": false,\n  \"error\": \"Email dispatch failed. Please verify Gmail OAuth2 connectivity and try again.\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "node-respond-502",
+      "name": "Respond 502 Delivery Failure",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1100, 340]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Validate Email Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Email Payload": {
+      "main": [
+        [{ "node": "If Payload Valid", "type": "main", "index": 0 }]
+      ]
+    },
+    "If Payload Valid": {
+      "main": [
+        [{ "node": "Gmail - Send Message", "type": "main", "index": 0 }],
+        [{ "node": "Respond 400 Bad Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail - Send Message": {
+      "main": [
+        [{ "node": "Respond 200 Success", "type": "main", "index": 0 }],
+        [{ "node": "Respond 502 Delivery Failure", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
