@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { PageHeader } from '../components/UIComponents';
-import { ArrowRight, Upload, X, FileText, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { ArrowRight, Upload, X, FileText, AlertCircle, Loader2, Search, Users, Check, ChevronDown } from 'lucide-react';
 
 export const CreateTicketPage = () => {
   const [formData, setFormData] = useState({
@@ -13,12 +14,19 @@ export const CreateTicketPage = () => {
     priority: 'medium',
   });
   const [categories, setCategories] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [taggedUserIds, setTaggedUserIds] = useState([]);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [isMemberDropdownOpen, setIsMemberDropdownOpen] = useState(false);
+  const memberDropdownRef = useRef(null);
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileError, setFileError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
   const { error, success } = useToast();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   // Allowed MIME types and extensions: .png, .jpg, .jpeg, .pdf, .txt, .log
@@ -45,8 +53,48 @@ export const CreateTicketPage = () => {
         setFormData((prev) => ({ ...prev, category_id: 1 }));
       }
     };
+
+    const fetchTeamMembers = async () => {
+      try {
+        const res = await api.get('/tickets/team-members');
+        setTeamMembers(res.data || []);
+      } catch {
+        setTeamMembers([]);
+      }
+    };
+
     fetchCategories();
+    fetchTeamMembers();
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (memberDropdownRef.current && !memberDropdownRef.current.contains(e.target)) {
+        setIsMemberDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleTaggedMember = (memberId) => {
+    setTaggedUserIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
+  const availableMembers = teamMembers.filter((m) => m.id !== user?.id);
+  const filteredMembers = availableMembers.filter((m) => {
+    const q = memberSearch.trim().toLowerCase();
+    if (!q) return true;
+    const fullName = `${m.first_name} ${m.last_name}`.toLowerCase();
+    return (
+      fullName.includes(q) ||
+      (m.email || '').toLowerCase().includes(q) ||
+      (m.role || '').toLowerCase().includes(q)
+    );
+  });
+  const selectedMembers = availableMembers.filter((m) => taggedUserIds.includes(m.id));
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -113,6 +161,7 @@ export const CreateTicketPage = () => {
         description: formData.description,
         category_id: formData.category_id || 1,
         priority: formData.priority,
+        tagged_user_ids: taggedUserIds.length > 0 ? taggedUserIds : undefined,
       });
 
       const ticketId = res.data.id;
@@ -241,6 +290,113 @@ export const CreateTicketPage = () => {
               <span>{fieldErrors.description}</span>
             </p>
           )}
+        </div>
+
+        {/* Tag Team Members (Searchable Dropdown) */}
+        <div ref={memberDropdownRef} className="relative">
+          <label htmlFor="tag-member-search" className="block text-xs font-mono uppercase tracking-wider text-neutral-700 mb-2">
+            Tag Team Members (Optional)
+          </label>
+
+          {selectedMembers.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {selectedMembers.map((m) => (
+                <span
+                  key={m.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-neutral-100 border border-neutral-300 text-xs font-mono text-black"
+                >
+                  <Users className="w-3 h-3 text-neutral-500" />
+                  <span>
+                    {m.first_name} {m.last_name}
+                  </span>
+                  <span className="text-[10px] uppercase text-neutral-500">({m.role})</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleTaggedMember(m.id)}
+                    aria-label={`Remove ${m.first_name} ${m.last_name}`}
+                    className="text-neutral-500 hover:text-black ml-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              id="tag-member-search"
+              type="text"
+              value={memberSearch}
+              onFocus={() => setIsMemberDropdownOpen(true)}
+              onChange={(e) => {
+                setMemberSearch(e.target.value);
+                if (!isMemberDropdownOpen) setIsMemberDropdownOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setIsMemberDropdownOpen(false);
+              }}
+              placeholder="Search team members by name, email, or role..."
+              className="w-full pl-10 pr-10 py-3 border border-neutral-300 focus:border-black focus:outline-none text-sm rounded-none bg-white font-mono"
+            />
+            <button
+              type="button"
+              onClick={() => setIsMemberDropdownOpen((prev) => !prev)}
+              aria-label="Toggle team member dropdown"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-black p-1"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${isMemberDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+
+          {isMemberDropdownOpen && (
+            <div className="absolute z-20 mt-1 w-full bg-white border border-neutral-300 shadow-lg max-h-60 overflow-y-auto">
+              {filteredMembers.length === 0 ? (
+                <div className="px-4 py-3 text-xs font-mono text-neutral-500">
+                  {availableMembers.length === 0
+                    ? 'No active team members available.'
+                    : 'No team members match your search.'}
+                </div>
+              ) : (
+                filteredMembers.map((m) => {
+                  const isSelected = taggedUserIds.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleTaggedMember(m.id)}
+                      className={`w-full px-4 py-2.5 text-left flex items-center justify-between text-xs font-mono border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 transition-colors ${
+                        isSelected ? 'bg-neutral-100' : ''
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-black truncate">
+                          {m.first_name} {m.last_name}
+                        </div>
+                        <div className="text-[11px] text-neutral-500 truncate">{m.email}</div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-3">
+                        <span className="px-1.5 py-0.5 text-[10px] uppercase border border-neutral-300 text-neutral-600 bg-white">
+                          {m.role}
+                        </span>
+                        <span
+                          className={`w-4 h-4 border flex items-center justify-center ${
+                            isSelected ? 'bg-black border-black text-white' : 'border-neutral-300 bg-white'
+                          }`}
+                        >
+                          {isSelected && <Check className="w-3 h-3" />}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          )}
+          <p className="text-[11px] font-mono text-neutral-500 mt-1.5">
+            Tagged colleagues receive an in-app mention notification and are listed on the ticket.
+          </p>
         </div>
 
         {/* Diagnostic Attachment Guidance */}
