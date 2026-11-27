@@ -138,6 +138,48 @@ def list_tickets(
     )
 
 
+@router.get("/categories", response_model=List[CategoryResponse])
+def list_active_categories(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Authenticated endpoint: list all active, non-deleted categories for ticket creation/filtering."""
+    return (
+        db.query(Category)
+        .filter(Category.is_active.is_(True), Category.deleted_at.is_(None))
+        .order_by(Category.name.asc())
+        .all()
+    )
+
+
+@router.get("/team-members")
+def get_team_members(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Authenticated endpoint: list all active colleagues/team members for tagging in tickets."""
+    users = (
+        db.query(User)
+        .filter(
+            User.is_active.is_(True),
+            User.approval_status == "approved",
+            User.deleted_at.is_(None),
+        )
+        .order_by(User.first_name.asc(), User.last_name.asc())
+        .all()
+    )
+    return [
+        {
+            "id": u.id,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "email": u.email,
+            "role": u.role,
+        }
+        for u in users
+    ]
+
+
 @router.get("/{ticket_id}", response_model=TicketResponse)
 def get_ticket(
     ticket_id: int,
@@ -201,48 +243,6 @@ def patch_ticket_general(
     return ticket_service.put_update_ticket(
         db, ticket_id, TicketPutUpdate(title=new_title, description=new_desc), current_user
     )
-
-
-@router.get("/categories", response_model=List[CategoryResponse])
-def list_active_categories(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Authenticated endpoint: list all active, non-deleted categories for ticket creation/filtering."""
-    return (
-        db.query(Category)
-        .filter(Category.is_active.is_(True), Category.deleted_at.is_(None))
-        .order_by(Category.name.asc())
-        .all()
-    )
-
-
-@router.get("/team-members")
-def get_team_members(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Authenticated endpoint: list all active colleagues/team members for tagging in tickets."""
-    users = (
-        db.query(User)
-        .filter(
-            User.is_active.is_(True),
-            User.approval_status == "approved",
-            User.deleted_at.is_(None),
-        )
-        .order_by(User.first_name.asc(), User.last_name.asc())
-        .all()
-    )
-    return [
-        {
-            "id": u.id,
-            "first_name": u.first_name,
-            "last_name": u.last_name,
-            "email": u.email,
-            "role": u.role,
-        }
-        for u in users
-    ]
 
 
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
